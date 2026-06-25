@@ -13,12 +13,12 @@ from services.origins import normalize_origin, validate_origin_format
 
 class SignupRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=6, max_length=72)
 
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(..., max_length=72)
 
 
 class AuthResponse(BaseModel):
