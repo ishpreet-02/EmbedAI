@@ -1,0 +1,25 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Node
+node_modules/
+dist/
+.env.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Deployment artifacts (don't push these)
+*.zip
+temp_deploy/
+deployment-files/
+ADD_TO_MAIN_PY.py

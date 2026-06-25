@@ -1,0 +1,89 @@
+"""
+Background ingestion task.
+Runs scraping in the background using FastAPI's BackgroundTasks.
+(Will be migrated to Celery + Redis in Week 5 for Docker deployment.)
+"""
+
+import asyncio
+import logging
+from services.scraper import scrape_website
+from services.rag import ingest_pages
+from services.database import get_supabase
+
+logger = logging.getLogger(__name__)
+
+
+async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str):
+    """
+    Full ingestion pipeline (runs in background):
+    1. Update status to 'processing'
+    2. Scrape the website
+    3. Chunk + embed + store in Qdrant  ← Week 3
+    4. Update status to 'ready' or 'failed'
+    """
+    supabase = get_supabase()
+
+    try:
+        # ── Step 1: Mark as processing ────────────────────
+        supabase.table("chatbots").update({
+            "status": "processing"
+        }).eq("id", chatbot_id).execute()
+
+        logger.info(f"[Ingest] Starting scrape for chatbot {chatbot_id}: {website_url}")
+
+        # ── Step 2: Scrape the website ────────────────────
+        pages = await scrape_website(website_url)
+
+        if not pages:
+            logger.warning(f"[Ingest] No pages scraped from {website_url}")
+            supabase.table("chatbots").update({
+                "status": "failed",
+                "pages_indexed": 0,
+                "chunks_stored": 0,
+            }).eq("id", chatbot_id).execute()
+            return
+
+        logger.info(f"[Ingest] Scraped {len(pages)} pages from {website_url}")
+
+        # ── Step 3: Chunk → Embed → Store in Qdrant ──────
+        # ingest_pages is CPU-bound (sentence-transformers runs on CPU).
+        # run_in_executor moves it off the async event loop so other
+        # requests aren't blocked while embeddings are computed.
+        logger.info(f"[Ingest] Starting RAG ingestion into collection: {collection_name}")
+
+        loop = asyncio.get_event_loop()
+        chunks_stored = await loop.run_in_executor(
+            None,           # Default ThreadPoolExecutor
+            ingest_pages,   # Sync function
+            pages,          # arg 1
+            collection_name # arg 2
+        )
+
+        if chunks_stored == 0:
+            logger.warning(f"[Ingest] Ingestion produced 0 chunks — marking failed")
+            supabase.table("chatbots").update({
+                "status": "failed",
+                "pages_indexed": len(pages),
+                "chunks_stored": 0,
+            }).eq("id", chatbot_id).execute()
+            return
+
+        logger.info(f"[Ingest] Stored {chunks_stored} chunks in Qdrant")
+
+        # ── Step 4: Mark as ready ─────────────────────────
+        supabase.table("chatbots").update({
+            "status": "ready",
+            "pages_indexed": len(pages),
+            "chunks_stored": chunks_stored,
+        }).eq("id", chatbot_id).execute()
+
+        logger.info(
+            f"[Ingest] DONE — Chatbot {chatbot_id} ready! "
+            f"({len(pages)} pages, {chunks_stored} chunks)"
+        )
+
+    except Exception as e:
+        logger.error(f"[Ingest] Failed for chatbot {chatbot_id}: {e}", exc_info=True)
+        supabase.table("chatbots").update({
+            "status": "failed",
+        }).eq("id", chatbot_id).execute()
