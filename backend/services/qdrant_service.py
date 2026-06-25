@@ -13,9 +13,13 @@ from services.embedder import EMBEDDING_DIM
 logger = logging.getLogger(__name__)
 
 # Single client reused across all requests
-# Qdrant Cloud uses URL + API key; local dev uses host + port
+# If QDRANT_API_KEY is set → connect to Qdrant Cloud via HTTPS
+# Otherwise → connect to local Docker Qdrant
 if QDRANT_API_KEY:
-    _client = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
+    _client = QdrantClient(
+        url=f"https://{QDRANT_HOST}",
+        api_key=QDRANT_API_KEY,
+    )
     logger.info(f"[Qdrant] Connected to Qdrant Cloud: {QDRANT_HOST}")
 else:
     _client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)

@@ -19,10 +19,10 @@ JWT_EXPIRATION_MINUTES: int = int(os.getenv("JWT_EXPIRATION_MINUTES", "1440"))
 # ── Groq (Week 3) ────────────────────────────────────────
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
 
-# ── Qdrant (Week 3) ──────────────────────────────────────
+# ── Qdrant ────────────────────────────────────────────
 QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
-QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
+QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")  # Set for Qdrant Cloud
 
 # ── Redis (Week 2) ───────────────────────────────────────
 REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")

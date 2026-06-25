@@ -1,8 +1,6 @@
 __pycache__
 *.pyc
 *.pyo
-.env
-.env.local
 .git
 .gitignore
 .vscode
@@ -12,3 +10,5 @@ venv/
 node_modules/
 frontend/
 .pytest_cache/
+test_*.py
+check_status.py

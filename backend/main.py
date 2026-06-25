@@ -11,6 +11,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 import os
 
 from config import FRONTEND_URL
@@ -22,8 +24,13 @@ app = FastAPI(
     title="AI Chatbot SaaS Platform",
     description="Scrape any website → Build a RAG chatbot → Embed it anywhere",
     version="1.0.0",
-    debug=True,
+    debug=os.getenv("DEBUG", "false").lower() == "true",
 )
+
+# ── Rate Limiter (slowapi) ────────────────────────────────
+
+app.state.limiter = chat.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──────────────────────────────────────────────────
 
@@ -49,8 +56,12 @@ app.include_router(chat.router)
 
 # ── Static Files (Widget) ─────────────────────────────────
 
-# Serve widget.js — checks Docker mount first, then local dev path
+# Serve widget.js — checks multiple paths:
+# 1. Docker mount at /app/static/widget.js
+# 2. Backend's own widget/ directory (for Render deploy)
+# 3. Local dev path (../widget/chatbot-widget.js)
 WIDGET_DOCKER_PATH = os.path.join(os.path.dirname(__file__), "static", "widget.js")
+WIDGET_BACKEND_PATH = os.path.join(os.path.dirname(__file__), "widget", "chatbot-widget.js")
 WIDGET_LOCAL_PATH = os.path.join(os.path.dirname(__file__), "..", "widget", "chatbot-widget.js")
 
 if os.path.exists("widget"):
@@ -60,7 +71,7 @@ if os.path.exists("widget"):
 @app.get("/widget.js", include_in_schema=False)
 async def serve_widget_js():
     """Serve the embeddable chat widget script."""
-    for path in [WIDGET_DOCKER_PATH, WIDGET_LOCAL_PATH]:
+    for path in [WIDGET_DOCKER_PATH, WIDGET_BACKEND_PATH, WIDGET_LOCAL_PATH]:
         if os.path.exists(path):
             return FileResponse(
                 path,

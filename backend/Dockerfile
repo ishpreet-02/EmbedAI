@@ -1,5 +1,5 @@
-# ── Stage 1: Build with all dependencies ──────────────────
-FROM python:3.11-slim AS base
+# ── Dockerfile for Render deployment ──────────────────────
+FROM python:3.11-slim
 
 # Prevent Python from writing .pyc and buffering stdout/stderr
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -27,15 +27,12 @@ RUN playwright install chromium && playwright install-deps chromium
 # Copy application code
 COPY . .
 
-# Create directory for widget static file
-RUN mkdir -p /app/static
-
-# Expose port
+# Expose port (Render uses $PORT env var, defaults to 8000)
 EXPOSE 8000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run with uvicorn
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Run with uvicorn — Render sets PORT env var automatically
+CMD ["sh", "-c", "uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
