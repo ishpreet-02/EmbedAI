@@ -7,13 +7,19 @@ import logging
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
-from config import QDRANT_HOST, QDRANT_PORT
+from config import QDRANT_HOST, QDRANT_PORT, QDRANT_API_KEY
 from services.embedder import EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
 
 # Single client reused across all requests
-_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+# Qdrant Cloud uses URL + API key; local dev uses host + port
+if QDRANT_API_KEY:
+    _client = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
+    logger.info(f"[Qdrant] Connected to Qdrant Cloud: {QDRANT_HOST}")
+else:
+    _client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+    logger.info(f"[Qdrant] Connected to local Qdrant: {QDRANT_HOST}:{QDRANT_PORT}")
 
 
 def create_collection(collection_name: str) -> None:
