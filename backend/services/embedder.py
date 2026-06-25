@@ -6,7 +6,13 @@ Runs entirely locally, zero API cost, 384-dim vectors.
 import logging
 from sentence_transformers import SentenceTransformer
 
+import torch
+
 logger = logging.getLogger(__name__)
+
+# Optimize PyTorch memory for free tier
+torch.set_num_threads(1)
+torch.set_grad_enabled(False)
 
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 EMBEDDING_DIM = 384  # Qdrant collection must match this
