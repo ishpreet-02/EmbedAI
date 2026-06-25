@@ -22,7 +22,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
 
 # Install Playwright browsers
-RUN playwright install chromium && playwright install-deps chromium
+RUN python -m playwright install chromium && python -m playwright install-deps chromium
 
 # Copy application code
 COPY . .
