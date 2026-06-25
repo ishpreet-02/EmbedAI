@@ -13,7 +13,7 @@ export default function Sidebar() {
     <aside className="sidebar">
       <div className="sidebar-logo">
         <Bot size={22} />
-        <span>ChatSaaS</span>
+        <span>EmbedAI</span>
       </div>
 
       <nav className="sidebar-nav">

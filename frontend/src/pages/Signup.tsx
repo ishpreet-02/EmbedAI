@@ -37,7 +37,7 @@ export default function Signup() {
       <div className="form-card">
         <div className="form-logo">
           <Bot size={22} />
-          ChatSaaS
+          EmbedAI
         </div>
 
         <h1 className="form-title">Create your account</h1>

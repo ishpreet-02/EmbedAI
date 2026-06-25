@@ -2,6 +2,8 @@ import { useState, useRef, useEffect } from 'react'
 import { Send } from 'lucide-react'
 import { API_BASE } from '../api/client'
 
+const MAX_MESSAGE_LENGTH = 1000
+
 interface Msg {
   role: 'user' | 'assistant'
   content: string
@@ -25,6 +27,7 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
   const send = async () => {
     const text = input.trim()
     if (!text || streaming) return
+    if (text.length > MAX_MESSAGE_LENGTH) return
 
     setInput('')
 
@@ -44,7 +47,15 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
       })
 
       if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`)
+        const err = await res.json().catch(() => ({}))
+        const detail = err.detail
+        const message =
+          typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d: { msg?: string }) => d.msg).join(', ')
+              : `HTTP ${res.status}`
+        throw new Error(message)
       }
 
       const reader = res.body!.getReader()
@@ -64,12 +75,13 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
           return updated
         })
       }
-    } catch {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong.'
       setMessages((prev) => {
         const updated = [...prev]
         updated[updated.length - 1] = {
           role: 'assistant',
-          content: 'Something went wrong. Make sure your backend is running.',
+          content: message,
         }
         return updated
       })
@@ -103,6 +115,7 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
           placeholder="Ask something…"
           value={input}
           disabled={streaming}
+          maxLength={MAX_MESSAGE_LENGTH}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
         />

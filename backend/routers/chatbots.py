@@ -8,13 +8,16 @@ import asyncio
 
 from fastapi import APIRouter, HTTPException, status, Depends
 
+from config import FRONTEND_URL
 from models.schemas import (
     CreateChatbotRequest,
+    UpdateChatbotRequest,
     ChatbotResponse,
     ChatbotStatusResponse,
 )
 from middleware.auth import get_current_user
 from services.database import get_supabase
+from services.origins import default_allowed_origins
 from tasks.ingest import run_ingestion
 
 import logging
@@ -49,6 +52,7 @@ async def create_chatbot(
         "website_url": body.website_url,
         "status": "pending",
         "qdrant_collection": collection_name,
+        "allowed_origins": default_allowed_origins(body.website_url, FRONTEND_URL),
     }).execute()
 
     if not result.data:
@@ -95,6 +99,32 @@ async def get_chatbot(
 
     chatbot = _get_owned_chatbot(chatbot_id, current_user["id"])
     return _to_chatbot_response(chatbot)
+
+
+@router.patch("/{chatbot_id}", response_model=ChatbotResponse)
+async def update_chatbot(
+    chatbot_id: str,
+    body: UpdateChatbotRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    """Update chatbot settings (e.g. widget allowed origins)."""
+    supabase = get_supabase()
+    _get_owned_chatbot(chatbot_id, current_user["id"])
+
+    result = (
+        supabase.table("chatbots")
+        .update({"allowed_origins": body.allowed_origins})
+        .eq("id", chatbot_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update chatbot",
+        )
+
+    return _to_chatbot_response(result.data[0])
 
 
 @router.delete("/{chatbot_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -174,5 +204,6 @@ def _to_chatbot_response(chatbot: dict) -> ChatbotResponse:
         qdrant_collection=chatbot.get("qdrant_collection"),
         pages_indexed=chatbot.get("pages_indexed"),
         chunks_stored=chatbot.get("chunks_stored"),
+        allowed_origins=chatbot.get("allowed_origins") or [],
         created_at=str(chatbot["created_at"]),
     )

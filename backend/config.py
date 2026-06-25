@@ -29,3 +29,19 @@ REDIS_URL: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 
 # ── CORS ──────────────────────────────────────────────────
 FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:5173")
+
+# Comma-separated extra origins, e.g. "https://getembedai.vercel.app,https://preview.vercel.app"
+_CORS_ORIGINS_RAW: str = os.getenv("CORS_ORIGINS", "")
+
+
+def get_cors_origins() -> list[str]:
+    """Explicit origins always allowed (dashboard + local dev)."""
+    origins = [
+        FRONTEND_URL,
+        "http://localhost:5173",
+        "http://localhost:5174",
+        "http://localhost:3000",
+    ]
+    if _CORS_ORIGINS_RAW:
+        origins.extend(o.strip() for o in _CORS_ORIGINS_RAW.split(",") if o.strip())
+    return list(dict.fromkeys(origins))

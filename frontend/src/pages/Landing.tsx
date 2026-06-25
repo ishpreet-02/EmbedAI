@@ -22,7 +22,7 @@ export default function Landing() {
       <header className="landing-nav">
         <Link to="/" className="landing-logo">
           <Bot size={22} />
-          ChatSaaS
+          EmbedAI
         </Link>
         <div className="landing-nav-actions">
           <Link to="/login" className="btn-secondary">Log in</Link>
@@ -202,7 +202,7 @@ export default function Landing() {
         <div className="footer-inner">
           <div className="footer-brand">
             <Bot size={15} />
-            ChatSaaS
+            EmbedAI
           </div>
           <div className="footer-tech">
             Built with React, FastAPI, LangChain, and LLaMA 3

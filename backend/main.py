@@ -1,5 +1,5 @@
 """
-AI Chatbot SaaS Platform — FastAPI entry point.
+EmbedAI — FastAPI entry point.
 """
 
 import logging
@@ -15,13 +15,13 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 import os
 
-from config import FRONTEND_URL
+from config import get_cors_origins
 from routers import auth, chatbots, chat
 
 # ── App ───────────────────────────────────────────────────
 
 app = FastAPI(
-    title="AI Chatbot SaaS Platform",
+    title="EmbedAI",
     description="Scrape any website → Build a RAG chatbot → Embed it anywhere",
     version="1.0.0",
     debug=os.getenv("DEBUG", "false").lower() == "true",
@@ -33,19 +33,19 @@ app.state.limiter = chat.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # ── CORS ──────────────────────────────────────────────────
+# Regex covers Vercel preview URLs + customer sites embedding the widget.
+# Explicit origins from FRONTEND_URL / CORS_ORIGINS cover the dashboard.
+
+CORS_ORIGIN_REGEX = r"https?://.*"
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        FRONTEND_URL,
-        "http://localhost:5173",
-        "http://localhost:5174",
-        "http://localhost:3000",
-        "*" # Allow all for the widget embed
-    ],
+    allow_origins=get_cors_origins(),
+    allow_origin_regex=CORS_ORIGIN_REGEX,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Visitor-Id", "X-Conversation-Id"],
 )
 
 # ── Routers ───────────────────────────────────────────────
@@ -91,22 +91,29 @@ async def serve_widget_js():
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     traceback.print_exc()
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content={"detail": str(exc)},
     )
+    # Ensure CORS headers on error responses (browser otherwise reports a CORS failure)
+    origin = request.headers.get("origin")
+    if origin:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 # ── Health check ──────────────────────────────────────────
 
 @app.get("/health", tags=["Health"])
 async def health():
-    return {"status": "healthy", "service": "AI Chatbot SaaS Platform"}
+    return {"status": "healthy", "service": "EmbedAI"}
 
 
 @app.get("/", tags=["Health"])
 async def root():
     return {
-        "message": "AI Chatbot SaaS Platform API",
+        "message": "EmbedAI API",
         "docs": "/docs",
         "health": "/health",
     }

@@ -21,3 +21,4 @@ Thumbs.db
 # Temp files
 *.zip
 deployment-files-extracted/
+DEPLOYMENT_GUIDE.md

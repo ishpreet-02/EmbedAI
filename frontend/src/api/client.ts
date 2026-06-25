@@ -54,6 +54,7 @@ export interface Chatbot {
   qdrant_collection: string
   pages_indexed: number
   chunks_stored: number
+  allowed_origins: string[]
   created_at: string
 }
 
@@ -64,6 +65,9 @@ export const chatbotsAPI = {
 
   create: (data: { name: string; website_url: string }) =>
     apiClient.post<Chatbot>('/api/chatbots', data),
+
+  update: (id: string, data: { allowed_origins: string[] }) =>
+    apiClient.patch<Chatbot>(`/api/chatbots/${id}`, data),
 
   delete: (id: string) => apiClient.delete(`/api/chatbots/${id}`),
 

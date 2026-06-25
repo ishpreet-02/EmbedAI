@@ -1,5 +1,5 @@
 /**
- * AI Chatbot SaaS — Embeddable Widget
+ * EmbedAI — Embeddable Widget
  * 
  * Usage: Business owners paste this on their site:
  * <script src="https://YOUR_API/widget.js" data-chatbot-id="CHATBOT_ID"></script>
@@ -20,6 +20,7 @@
     "http://localhost:8000";
   const POSITION = script?.getAttribute("data-position") || "right"; // "left" or "right"
   const PRIMARY_COLOR = script?.getAttribute("data-color") || "#6C3CE1";
+  const MAX_MESSAGE_LENGTH = 1000;
 
   if (!CHATBOT_ID) {
     console.error("[Chatbot Widget] Missing data-chatbot-id attribute on script tag.");
@@ -372,7 +373,7 @@
       </div>
 
       <div id="cb-input-area">
-        <input type="text" id="cb-input" placeholder="Type your message..." autocomplete="off" />
+        <input type="text" id="cb-input" placeholder="Type your message..." autocomplete="off" maxlength="1000" />
         <button id="cb-send-btn" title="Send">
           <svg viewBox="0 0 24 24" fill="currentColor">
             <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
@@ -381,7 +382,7 @@
       </div>
 
       <div id="cb-powered">
-        Powered by <a href="#">AI Chatbot SaaS</a>
+        Powered by <a href="#">EmbedAI</a>
       </div>
     </div>
   `;
@@ -409,6 +410,10 @@
   function sendMessage() {
     const text = input.value.trim();
     if (!text || isStreaming) return;
+    if (text.length > MAX_MESSAGE_LENGTH) {
+      addMessage("assistant", `Message is too long (max ${MAX_MESSAGE_LENGTH} characters).`);
+      return;
+    }
 
     // Add user message
     addMessage("user", text);
@@ -466,6 +471,15 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function formatErrorDetail(detail) {
+    if (!detail) return null;
+    if (typeof detail === "string") return detail;
+    if (Array.isArray(detail)) {
+      return detail.map((d) => d.msg || String(d)).join(", ");
+    }
+    return String(detail);
+  }
+
   // ── Streaming API Call ───────────────────────────────────
   async function fetchStreamingResponse(question) {
     try {
@@ -480,7 +494,7 @@
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || `Server error (${response.status})`);
+        throw new Error(formatErrorDetail(err.detail) || `Server error (${response.status})`);
       }
 
       // Save visitor ID from response headers
@@ -514,7 +528,8 @@
       messages.push({ role: "assistant", content: fullText });
     } catch (err) {
       removeTyping();
-      addMessage("assistant", "Sorry, something went wrong. Please try again.");
+      const message = err instanceof Error ? err.message : "Sorry, something went wrong. Please try again.";
+      addMessage("assistant", message);
       console.error("[Chatbot Widget]", err);
     } finally {
       isStreaming = false;

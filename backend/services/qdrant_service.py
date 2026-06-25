@@ -4,6 +4,7 @@ Uses delete + create instead of recreate_collection (deprecated in qdrant-client
 """
 
 import logging
+import tenacity
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 
@@ -11,6 +12,13 @@ from config import QDRANT_HOST, QDRANT_PORT, QDRANT_API_KEY
 from services.embedder import EMBEDDING_DIM
 
 logger = logging.getLogger(__name__)
+
+RETRY = tenacity.retry(
+    stop=tenacity.stop_after_attempt(3),
+    wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
+    reraise=True,
+    before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+)
 
 # Single client reused across all requests
 # If QDRANT_API_KEY is set → connect to Qdrant Cloud via HTTPS
@@ -26,6 +34,7 @@ else:
     logger.info(f"[Qdrant] Connected to local Qdrant: {QDRANT_HOST}:{QDRANT_PORT}")
 
 
+@RETRY
 def create_collection(collection_name: str) -> None:
     """
     Create a fresh Qdrant collection for a chatbot.
@@ -44,6 +53,7 @@ def create_collection(collection_name: str) -> None:
     logger.info(f"[Qdrant] Created collection: {collection_name}")
 
 
+@RETRY
 def upsert_chunks(
     collection_name: str,
     chunks: list[dict],       # [{"text": ..., "url": ..., "title": ...}]
@@ -66,6 +76,7 @@ def upsert_chunks(
     logger.info(f"[Qdrant] Stored {len(points)} chunks in '{collection_name}'")
 
 
+@RETRY
 def search_chunks(
     collection_name: str,
     query_vector: list[float],
@@ -91,6 +102,7 @@ def search_chunks(
     ]
 
 
+@RETRY
 def collection_exists(collection_name: str) -> bool:
     """Returns True if the collection exists and is queryable."""
     try:

@@ -3,7 +3,10 @@ RAG pipeline — text chunking, ingestion, and streaming query.
 """
 
 import logging
+from functools import lru_cache
 from typing import Generator
+
+import tenacity
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
 
@@ -19,6 +22,7 @@ GROQ_MODEL = "llama-3.3-70b-versatile"
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 50
 TOP_K = 5
+CACHE_MAX_SIZE = 200
 
 SYSTEM_PROMPT = """You are a helpful customer support assistant for a business website.
 Answer visitor questions using ONLY the context provided below.
@@ -34,6 +38,23 @@ _splitter = RecursiveCharacterTextSplitter(
     chunk_size=CHUNK_SIZE,
     chunk_overlap=CHUNK_OVERLAP,
 )
+
+
+@tenacity.retry(
+    stop=tenacity.stop_after_attempt(3),
+    wait=tenacity.wait_exponential(multiplier=1, min=1, max=10),
+    reraise=True,
+    before_sleep=tenacity.before_sleep_log(logger, logging.WARNING),
+)
+def _create_groq_stream(messages: list[dict]):
+    """Start a Groq streaming completion — retried if the API is briefly unavailable."""
+    return groq_client.chat.completions.create(
+        model=GROQ_MODEL,
+        messages=messages,
+        stream=True,
+        max_tokens=512,
+        temperature=0.1,
+    )
 
 
 # ── Ingestion ─────────────────────────────────────────────
@@ -83,7 +104,7 @@ def ingest_pages(pages: list[dict], collection_name: str) -> int:
     embeddings = embed_texts(texts)
     logger.info("[RAG] Embedding complete")
 
-    # Create collection and store
+    # Create collection and store (Qdrant ops are retried internally)
     create_collection(collection_name)
     upsert_chunks(collection_name, chunks, embeddings)
 
@@ -92,30 +113,19 @@ def ingest_pages(pages: list[dict], collection_name: str) -> int:
 
 # ── Query ─────────────────────────────────────────────────
 
-def query_rag(question: str, collection_name: str) -> Generator[str, None, None]:
+def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, None, None]:
     """
     RAG query pipeline — yields response tokens as they stream from Groq.
-    
-    Flow:
-      1. Embed question locally
-      2. Cosine search Qdrant → top 5 chunks
-      3. Build prompt: system prompt + context + question
-      4. Stream Groq LLaMA 3 response token by token
+    Not cached; use query_rag() for cache-aware streaming.
     """
-    # 1. Embed the question
     query_vector = embed_query(question)
-
-    # 2. Search Qdrant
     results = search_chunks(collection_name, query_vector, limit=TOP_K)
-
-    # Filter out low-relevance noise
     results = [r for r in results if r["score"] > 0.3]
 
     if not results:
         yield "I don't have enough information to answer that. Please contact us directly."
         return
 
-    # 3. Build context block from retrieved chunks
     context_parts = []
     for r in results:
         source = f" [from: {r['url']}]" if r.get("url") else ""
@@ -131,18 +141,59 @@ def query_rag(question: str, collection_name: str) -> Generator[str, None, None]
         },
     ]
 
-    # 4. Stream from Groq
-    logger.info(f"[RAG] Querying Groq with {len(results)} context chunks (top score: {results[0]['score']:.3f})")
-
-    stream = groq_client.chat.completions.create(
-        model=GROQ_MODEL,
-        messages=messages,
-        stream=True,
-        max_tokens=512,
-        temperature=0.1,  # Low = factual, less creative
+    logger.info(
+        f"[RAG] Querying Groq with {len(results)} context chunks "
+        f"(top score: {results[0]['score']:.3f})"
     )
+
+    stream = _create_groq_stream(messages)
 
     for chunk in stream:
         delta = chunk.choices[0].delta.content
         if delta:
             yield delta
+
+
+@lru_cache(maxsize=CACHE_MAX_SIZE)
+def get_cached_response(normalized_question: str, collection_name: str) -> str:
+    """Return full RAG response for repeated questions (not streamed)."""
+    return "".join(_stream_rag_uncached(normalized_question, collection_name))
+
+
+def _cache_key(question: str, collection_name: str) -> tuple[str, str]:
+    return (question.strip().lower(), collection_name)
+
+
+def query_rag(question: str, collection_name: str) -> Generator[str, None, None]:
+    """
+    Cache-aware RAG query. First request streams live from Groq; identical
+    questions reuse the cached full response (skips embed + Qdrant + Groq).
+    """
+    display_question = question.strip()
+    cache_key = _cache_key(display_question, collection_name)
+
+    cached = get_cached_response.cache.get(cache_key)
+    if cached is not None:
+        logger.info(f"[RAG] Cache hit for '{display_question[:60]}'")
+        yield cached
+        return
+
+    parts: list[str] = []
+    for token in _stream_rag_uncached(display_question, collection_name):
+        parts.append(token)
+        yield token
+
+    full = "".join(parts)
+    get_cached_response.cache[cache_key] = full
+
+
+def clear_response_cache() -> None:
+    """Clear all cached chat responses."""
+    get_cached_response.cache_clear()
+
+
+def clear_response_cache_for_collection(collection_name: str) -> None:
+    """Drop cached answers for one chatbot after its knowledge base changes."""
+    cache = get_cached_response.cache
+    for key in [k for k in cache if k[1] == collection_name]:
+        del cache[key]

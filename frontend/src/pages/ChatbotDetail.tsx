@@ -5,6 +5,7 @@ import { chatbotsAPI } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import EmbedCodeBox from '../components/EmbedCodeBox'
 import TestChatPanel from '../components/TestChatPanel'
+import AllowedOriginsSettings from '../components/AllowedOriginsSettings'
 
 export default function ChatbotDetail() {
   const { id } = useParams<{ id: string }>()
@@ -118,6 +119,11 @@ export default function ChatbotDetail() {
               </h2>
               <EmbedCodeBox chatbotId={chatbot.id} />
             </div>
+
+            <AllowedOriginsSettings
+              chatbotId={chatbot.id}
+              allowedOrigins={chatbot.allowed_origins ?? []}
+            />
 
             <div className="section">
               <h2 className="section-title">

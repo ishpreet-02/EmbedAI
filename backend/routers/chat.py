@@ -7,11 +7,12 @@ import logging
 import uuid
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 
+from models.schemas import ChatRequest
 from services.database import get_supabase
+from services.origins import extract_request_origin, is_origin_allowed
 from services.rag import query_rag
 from services.qdrant_service import collection_exists
 
@@ -22,11 +23,16 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter(prefix="/api/chat", tags=["Chat"])
 
 
-# ── Request / Response schemas ────────────────────────────
-
-class ChatRequest(BaseModel):
-    message: str = Field(..., max_length=1000)
-    visitor_id: str | None = None  # Widget can persist this in localStorage
+def _check_widget_origin(request: Request, allowed_origins: list[str] | None) -> None:
+    origin = extract_request_origin(
+        request.headers.get("origin"),
+        request.headers.get("referer"),
+    )
+    if not is_origin_allowed(origin, allowed_origins):
+        raise HTTPException(
+            status_code=403,
+            detail="This domain is not authorized to use this chatbot",
+        )
 
 
 # ── Endpoints ─────────────────────────────────────────────
@@ -52,7 +58,7 @@ def chat(request: Request, chatbot_id: str, body: ChatRequest):
     # ── 1. Validate chatbot ───────────────────────────────
     result = (
         supabase.table("chatbots")
-        .select("id, status, qdrant_collection, name")
+        .select("id, status, qdrant_collection, name, allowed_origins")
         .eq("id", chatbot_id)
         .single()
         .execute()
@@ -62,6 +68,8 @@ def chat(request: Request, chatbot_id: str, body: ChatRequest):
         raise HTTPException(status_code=404, detail="Chatbot not found")
 
     chatbot = result.data
+
+    _check_widget_origin(request, chatbot.get("allowed_origins"))
 
     if chatbot["status"] != "ready":
         raise HTTPException(
@@ -137,12 +145,25 @@ def chat(request: Request, chatbot_id: str, body: ChatRequest):
 
 
 @router.get("/{chatbot_id}/history")
-def get_history(chatbot_id: str, conversation_id: str):
+def get_history(request: Request, chatbot_id: str, conversation_id: str):
     """
     Fetch all messages in a conversation.
     Public endpoint — the widget can use this to restore chat on page reload.
     """
     supabase = get_supabase()
+
+    chatbot = (
+        supabase.table("chatbots")
+        .select("allowed_origins")
+        .eq("id", chatbot_id)
+        .single()
+        .execute()
+    )
+
+    if not chatbot.data:
+        raise HTTPException(status_code=404, detail="Chatbot not found")
+
+    _check_widget_origin(request, chatbot.data.get("allowed_origins"))
 
     # Verify conversation belongs to this chatbot (prevents cross-chatbot reads)
     conv = (

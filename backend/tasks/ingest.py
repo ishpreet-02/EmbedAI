@@ -7,7 +7,7 @@ Runs scraping in the background using FastAPI's BackgroundTasks.
 import asyncio
 import logging
 from services.scraper import scrape_website
-from services.rag import ingest_pages
+from services.rag import ingest_pages, clear_response_cache_for_collection
 from services.database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,8 @@ async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str)
             return
 
         logger.info(f"[Ingest] Stored {chunks_stored} chunks in Qdrant")
+
+        clear_response_cache_for_collection(collection_name)
 
         # ── Step 4: Mark as ready ─────────────────────────
         supabase.table("chatbots").update({
