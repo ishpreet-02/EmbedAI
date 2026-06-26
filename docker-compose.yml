@@ -1,73 +1,23 @@
-version: "3.8"
+# ══════════════════════════════════════════════════════════
+# EmbedAI — Docker Compose (EC2 Production)
+#
+# External services (NOT in this file):
+#   • Qdrant → Qdrant Cloud (free tier)
+#   • Postgres → Supabase (free tier)
+#   • Frontend → Vercel (free tier)
+# ══════════════════════════════════════════════════════════
 
 services:
-  # ── FastAPI Backend ───────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: chatbot-backend
+    container_name: embedai-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
-    environment:
-      # Override these so backend talks to Docker service names, not localhost
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - REDIS_URL=redis://redis:6379/0
-    depends_on:
-      qdrant:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
     volumes:
-      # Mount widget.js so you can update it without rebuilding
-      - ./widget/widget.js:/app/static/widget.js:ro
-    networks:
-      - chatbot-net
-
-  # ── Qdrant Vector Database ────────────────────────────────
-  qdrant:
-    image: qdrant/qdrant:v1.9.4
-    container_name: chatbot-qdrant
-    restart: unless-stopped
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - chatbot-net
-
-  # ── Redis (job queue) ─────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    container_name: chatbot-redis
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - chatbot-net
-
-volumes:
-  qdrant_data:
-  redis_data:
-
-networks:
-  chatbot-net:
-    driver: bridge
+      # Mount widget so you can update it without rebuilding
+      - ./backend/widget:/app/widget:ro
