@@ -25,6 +25,7 @@ app = FastAPI(
     description="Scrape any website → Build a RAG chatbot → Embed it anywhere",
     version="1.0.0",
     debug=os.getenv("DEBUG", "false").lower() == "true",
+    redirect_slashes=False,
 )
 
 # ── Rate Limiter (slowapi) ────────────────────────────────
