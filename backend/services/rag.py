@@ -113,6 +113,14 @@ def ingest_pages(pages: list[dict], collection_name: str) -> int:
 
 # ── Query ─────────────────────────────────────────────────
 
+# Plain dict cache: key = (normalized_question, collection_name), value = full response string
+# Using a plain dict instead of lru_cache so we can:
+#   1. Still stream tokens for first-time questions
+#   2. Return instantly from cache for repeated questions
+#   3. Selectively clear cache entries per chatbot collection
+_response_cache: dict[tuple[str, str], str] = {}
+
+
 def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, None, None]:
     """
     RAG query pipeline — yields response tokens as they stream from Groq.
@@ -154,31 +162,42 @@ def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, 
             yield delta
 
 
-@lru_cache(maxsize=CACHE_MAX_SIZE)
-def get_cached_response(normalized_question: str, collection_name: str) -> str:
-    """Return full RAG response for repeated questions (not streamed)."""
-    return "".join(_stream_rag_uncached(normalized_question, collection_name))
-
-
-def _cache_key(question: str, collection_name: str) -> tuple[str, str]:
-    return (question.strip().lower(), collection_name)
-
-
 def query_rag(question: str, collection_name: str) -> Generator[str, None, None]:
     """
-    Stream RAG response token by token from Groq.
-    Streams live from _stream_rag_uncached every time.
+    Cache-aware streaming RAG query.
+    - First time a question is asked: streams live from Groq, then caches the full response.
+    - Repeated identical questions: returns instantly from the in-memory cache.
     """
-    yield from _stream_rag_uncached(question.strip(), collection_name)
+    key = (question.strip().lower(), collection_name)
+
+    cached = _response_cache.get(key)
+    if cached is not None:
+        logger.info(f"[RAG] Cache hit for '{question[:60]}'")
+        yield cached
+        return
+
+    # Stream live and accumulate tokens to cache after completion
+    parts: list[str] = []
+    for token in _stream_rag_uncached(question.strip(), collection_name):
+        parts.append(token)
+        yield token
+
+    # Store in cache; evict oldest entry if at capacity
+    if len(_response_cache) >= CACHE_MAX_SIZE:
+        oldest_key = next(iter(_response_cache))
+        del _response_cache[oldest_key]
+    _response_cache[key] = "".join(parts)
 
 
 def clear_response_cache() -> None:
     """Clear all cached chat responses."""
-    get_cached_response.cache_clear()
+    _response_cache.clear()
 
 
 def clear_response_cache_for_collection(collection_name: str) -> None:
-    """Clear all cached chat responses after a chatbot's knowledge base changes."""
-    # lru_cache doesn't expose its internal dict — clear the whole cache.
-    # This is safe: stale answers are worse than a cold cache.
-    get_cached_response.cache_clear()
+    """Clear cached answers only for a specific chatbot (called after re-ingestion)."""
+    keys_to_delete = [k for k in _response_cache if k[1] == collection_name]
+    for k in keys_to_delete:
+        del _response_cache[k]
+    if keys_to_delete:
+        logger.info(f"[RAG] Cleared {len(keys_to_delete)} cache entries for '{collection_name}'")
