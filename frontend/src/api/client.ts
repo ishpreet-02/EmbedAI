@@ -55,6 +55,10 @@ export interface Chatbot {
   pages_indexed: number
   chunks_stored: number
   allowed_origins: string[]
+  widget_color: string
+  widget_header: string
+  widget_welcome: string
+  widget_position: 'left' | 'right'
   created_at: string
 }
 
@@ -66,8 +70,17 @@ export const chatbotsAPI = {
   create: (data: { name: string; website_url: string }) =>
     apiClient.post<Chatbot>('/api/chatbots', data),
 
-  update: (id: string, data: { allowed_origins: string[] }) =>
+  update: (id: string, data: {
+    allowed_origins?: string[]
+    widget_color?: string
+    widget_header?: string
+    widget_welcome?: string
+    widget_position?: 'left' | 'right'
+  }) =>
     apiClient.patch<Chatbot>(`/api/chatbots/${id}`, data),
+
+  resync: (id: string) =>
+    apiClient.post<{ id: string; status: string }>(`/api/chatbots/${id}/resync`),
 
   delete: (id: string) => apiClient.delete(`/api/chatbots/${id}`),
 

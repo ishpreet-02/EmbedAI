@@ -1,25 +1,37 @@
 import { Link, useParams, useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, Globe, MessageSquare, FileText, Database, ExternalLink } from 'lucide-react'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { ArrowLeft, Globe, MessageSquare, FileText, Database, ExternalLink, RefreshCw } from 'lucide-react'
 import { chatbotsAPI } from '../api/client'
 import StatusBadge from '../components/StatusBadge'
 import EmbedCodeBox from '../components/EmbedCodeBox'
 import TestChatPanel from '../components/TestChatPanel'
 import AllowedOriginsSettings from '../components/AllowedOriginsSettings'
+import WidgetCustomization from '../components/WidgetCustomization'
 
 export default function ChatbotDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const [resyncing, setResyncing] = useState(false)
 
   const { data: chatbot, isLoading, isError } = useQuery({
     queryKey: ['chatbot', id],
     queryFn: () => chatbotsAPI.get(id!).then((r) => r.data),
     enabled: !!id,
-    // Re-poll every 5s if still processing so the page reflects completion
-    refetchInterval: (query) =>
-      query.state.data?.status === 'processing' || query.state.data?.status === 'pending'
-        ? 5000
-        : false,
+    refetchInterval: (query) => {
+      const s = query.state.data?.status
+      return s === 'processing' || s === 'pending' ? 5000 : false
+    },
+  })
+
+  const resyncMutation = useMutation({
+    mutationFn: () => chatbotsAPI.resync(id!),
+    onSuccess: () => {
+      setResyncing(true)
+      queryClient.invalidateQueries({ queryKey: ['chatbot', id] })
+      setTimeout(() => setResyncing(false), 1000)
+    },
   })
 
   const hostname = (() => {
@@ -66,7 +78,19 @@ export default function ChatbotDetail() {
             <ExternalLink size={11} />
           </a>
         </div>
-        <StatusBadge status={chatbot.status} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <button
+            className="btn-secondary"
+            onClick={() => resyncMutation.mutate()}
+            disabled={resyncMutation.isPending || resyncing || chatbot.status === 'processing' || chatbot.status === 'pending'}
+            title="Re-scrape the website and update the knowledge base"
+            style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}
+          >
+            <RefreshCw size={13} style={{ animation: (resyncMutation.isPending || chatbot.status === 'processing') ? 'spin 1s linear infinite' : 'none' }} />
+            Resync
+          </button>
+          <StatusBadge status={chatbot.status} />
+        </div>
       </div>
 
       {/* Stats */}
@@ -124,6 +148,8 @@ export default function ChatbotDetail() {
               chatbotId={chatbot.id}
               allowedOrigins={chatbot.allowed_origins ?? []}
             />
+
+            <WidgetCustomization chatbot={chatbot} />
 
             <div className="section">
               <h2 className="section-title">

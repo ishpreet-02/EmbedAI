@@ -111,9 +111,24 @@ async def update_chatbot(
     supabase = get_supabase()
     _get_owned_chatbot(chatbot_id, current_user["id"])
 
+    update_data: dict = {}
+    if body.allowed_origins is not None:
+        update_data["allowed_origins"] = body.allowed_origins
+    if body.widget_color is not None:
+        update_data["widget_color"] = body.widget_color
+    if body.widget_header is not None:
+        update_data["widget_header"] = body.widget_header
+    if body.widget_welcome is not None:
+        update_data["widget_welcome"] = body.widget_welcome
+    if body.widget_position is not None:
+        update_data["widget_position"] = body.widget_position
+
+    if not update_data:
+        return _to_chatbot_response(_get_owned_chatbot(chatbot_id, current_user["id"]))
+
     result = (
         supabase.table("chatbots")
-        .update({"allowed_origins": body.allowed_origins})
+        .update(update_data)
         .eq("id", chatbot_id)
         .execute()
     )
@@ -167,6 +182,41 @@ async def get_chatbot_status(
         status=chatbot["status"],
         pages_indexed=chatbot.get("pages_indexed"),
         chunks_stored=chatbot.get("chunks_stored"),
+    )
+
+
+@router.post("/{chatbot_id}/resync", response_model=ChatbotStatusResponse)
+async def resync_chatbot(
+    chatbot_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Re-run scraping + ingestion for an existing chatbot (e.g. after site update)."""
+    supabase = get_supabase()
+
+    chatbot = _get_owned_chatbot(chatbot_id, current_user["id"])
+
+    # Reset status to pending so the UI shows the progress
+    supabase.table("chatbots").update({"status": "pending", "pages_indexed": 0, "chunks_stored": 0}).eq("id", chatbot_id).execute()
+
+    # Clear any cached responses for this chatbot
+    from services.rag import clear_response_cache_for_collection
+    clear_response_cache_for_collection(chatbot["qdrant_collection"])
+
+    # Kick off ingestion in a background thread
+    thread = threading.Thread(
+        target=_run_ingestion_in_thread,
+        args=(chatbot["id"], chatbot["website_url"], chatbot["qdrant_collection"]),
+        daemon=True,
+    )
+    thread.start()
+
+    logger.info(f"[Resync] Started resync for chatbot {chatbot_id}")
+
+    return ChatbotStatusResponse(
+        id=chatbot_id,
+        status="pending",
+        pages_indexed=0,
+        chunks_stored=0,
     )
 
 
@@ -226,5 +276,9 @@ def _to_chatbot_response(chatbot: dict) -> ChatbotResponse:
         pages_indexed=chatbot.get("pages_indexed"),
         chunks_stored=chatbot.get("chunks_stored"),
         allowed_origins=chatbot.get("allowed_origins") or [],
+        widget_color=chatbot.get("widget_color") or "#6366f1",
+        widget_header=chatbot.get("widget_header") or "AI Assistant",
+        widget_welcome=chatbot.get("widget_welcome") or "Hi there! How can I help you today?",
+        widget_position=chatbot.get("widget_position") or "right",
         created_at=str(chatbot["created_at"]),
     )

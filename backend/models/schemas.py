@@ -41,11 +41,17 @@ class CreateChatbotRequest(BaseModel):
 
 
 class UpdateChatbotRequest(BaseModel):
-    allowed_origins: list[str]
+    allowed_origins: Optional[list[str]] = None
+    widget_color: Optional[str] = None
+    widget_header: Optional[str] = None
+    widget_welcome: Optional[str] = None
+    widget_position: Optional[Literal['left', 'right']] = None
 
     @field_validator("allowed_origins")
     @classmethod
-    def validate_origins(cls, v: list[str]) -> list[str]:
+    def validate_origins(cls, v: Optional[list[str]]) -> Optional[list[str]]:
+        if v is None:
+            return v
         if len(v) > 20:
             raise ValueError("Maximum 20 allowed origins")
         normalized: list[str] = []
@@ -73,6 +79,10 @@ class ChatbotResponse(BaseModel):
     pages_indexed: Optional[int] = None
     chunks_stored: Optional[int] = None
     allowed_origins: list[str] = []
+    widget_color: str = '#6366f1'
+    widget_header: str = 'AI Assistant'
+    widget_welcome: str = 'Hi there! How can I help you today?'
+    widget_position: str = 'right'
     created_at: str
 
 
