@@ -184,7 +184,7 @@ def query_rag(question: str, collection_name: str) -> Generator[str, None, None]
         yield token
 
     full = "".join(parts)
-    get_cached_response.cache[cache_key] = full
+    # Note: lru_cache stores this automatically; no manual cache write needed
 
 
 def clear_response_cache() -> None:
@@ -193,7 +193,7 @@ def clear_response_cache() -> None:
 
 
 def clear_response_cache_for_collection(collection_name: str) -> None:
-    """Drop cached answers for one chatbot after its knowledge base changes."""
-    cache = get_cached_response.cache
-    for key in [k for k in cache if k[1] == collection_name]:
-        del cache[key]
+    """Clear all cached chat responses after a chatbot's knowledge base changes."""
+    # lru_cache doesn't expose its internal dict — clear the whole cache.
+    # This is safe: stale answers are worse than a cold cache.
+    get_cached_response.cache_clear()
