@@ -170,6 +170,27 @@ async def get_chatbot_status(
     )
 
 
+@router.get("/{chatbot_id}/conversations")
+async def get_chatbot_conversations(
+    chatbot_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Get all conversations for a chatbot (must belong to current user)."""
+    supabase = get_supabase()
+
+    _get_owned_chatbot(chatbot_id, current_user["id"])
+
+    conversations = (
+        supabase.table("conversations")
+        .select("id, visitor_id, created_at")
+        .eq("chatbot_id", chatbot_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+
+    return conversations.data or []
+
+
 # ── Helpers ───────────────────────────────────────────────
 
 def _get_owned_chatbot(chatbot_id: str, user_id: str) -> dict:
