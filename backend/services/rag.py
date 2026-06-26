@@ -166,25 +166,10 @@ def _cache_key(question: str, collection_name: str) -> tuple[str, str]:
 
 def query_rag(question: str, collection_name: str) -> Generator[str, None, None]:
     """
-    Cache-aware RAG query. First request streams live from Groq; identical
-    questions reuse the cached full response (skips embed + Qdrant + Groq).
+    Stream RAG response token by token from Groq.
+    Streams live from _stream_rag_uncached every time.
     """
-    display_question = question.strip()
-    cache_key = _cache_key(display_question, collection_name)
-
-    cached = get_cached_response.cache.get(cache_key)
-    if cached is not None:
-        logger.info(f"[RAG] Cache hit for '{display_question[:60]}'")
-        yield cached
-        return
-
-    parts: list[str] = []
-    for token in _stream_rag_uncached(display_question, collection_name):
-        parts.append(token)
-        yield token
-
-    full = "".join(parts)
-    # Note: lru_cache stores this automatically; no manual cache write needed
+    yield from _stream_rag_uncached(question.strip(), collection_name)
 
 
 def clear_response_cache() -> None:
