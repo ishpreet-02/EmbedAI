@@ -241,6 +241,35 @@ async def get_chatbot_conversations(
     return conversations.data or []
 
 
+@router.get("/{chatbot_id}/widget-config")
+async def get_widget_config(chatbot_id: str):
+    """
+    PUBLIC endpoint — no auth required.
+    Called by the embedded widget on every page load to get dynamic config.
+    Returns color, header text, welcome message, and bubble position.
+    """
+    supabase = get_supabase()
+
+    result = (
+        supabase.table("chatbots")
+        .select("widget_color, widget_header, widget_welcome, widget_position, status")
+        .eq("id", chatbot_id)
+        .single()
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Chatbot not found")
+
+    data = result.data
+    return {
+        "color":    data.get("widget_color")   or "#6366f1",
+        "header":   data.get("widget_header")  or "AI Assistant",
+        "welcome":  data.get("widget_welcome") or "Hi there! How can I help you today?",
+        "position": data.get("widget_position") or "right",
+    }
+
+
 # ── Helpers ───────────────────────────────────────────────
 
 def _get_owned_chatbot(chatbot_id: str, user_id: str) -> dict:
