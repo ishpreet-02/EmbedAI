@@ -33,6 +33,7 @@
   // ── State ─────────────────────────────────────────────────────────────────
   let isOpen = false;
   let visitorId = localStorage.getItem("chatbot_visitor_id") || null;
+  let conversationId = null; // set after first successful response
   let messages = [];
   let isStreaming = false;
 
@@ -490,10 +491,13 @@
     // ── Streaming API Call ──────────────────────────────────────────────────
     async function fetchStreamingResponse(question) {
       try {
+        const postBody = { message: question, visitor_id: visitorId };
+        if (conversationId) postBody.conversation_id = conversationId;
+
         const response = await fetch(`${API_BASE}/api/chat/${CHATBOT_ID}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: question, visitor_id: visitorId }),
+          body: JSON.stringify(postBody),
         });
 
         if (!response.ok) {
@@ -505,6 +509,12 @@
         if (newVisitorId) {
           visitorId = newVisitorId;
           localStorage.setItem("chatbot_visitor_id", visitorId);
+        }
+
+        // Persist conversation so subsequent messages append to same thread
+        const newConversationId = response.headers.get("X-Conversation-Id");
+        if (newConversationId) {
+          conversationId = newConversationId;
         }
 
         removeTyping();

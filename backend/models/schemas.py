@@ -98,6 +98,7 @@ class ChatbotStatusResponse(BaseModel):
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
     visitor_id: Optional[str] = None
+    conversation_id: Optional[str] = None
 
 
 class MessageResponse(BaseModel):

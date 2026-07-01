@@ -86,15 +86,31 @@ def chat(request: Request, chatbot_id: str, body: ChatRequest):
             detail="Knowledge base not found. Please re-create the chatbot.",
         )
 
-    # ── 2. Create conversation record ─────────────────────
+    # ── 2. Resolve conversation ────────────────────────────
     visitor_id = body.visitor_id or f"visitor_{uuid.uuid4().hex[:8]}"
-    conversation_id = str(uuid.uuid4())
+    conversation_id = None
 
-    supabase.table("conversations").insert({
-        "id": conversation_id,
-        "chatbot_id": chatbot_id,
-        "visitor_id": visitor_id,
-    }).execute()
+    # If the client sent a conversation_id, verify it exists AND belongs
+    # to this chatbot before reusing it — never trust client input blindly.
+    if body.conversation_id:
+        existing = (
+            supabase.table("conversations")
+            .select("id")
+            .eq("id", body.conversation_id)
+            .eq("chatbot_id", chatbot_id)
+            .execute()
+        )
+        if existing.data:
+            conversation_id = body.conversation_id
+
+    # No valid existing conversation → create a new one
+    if not conversation_id:
+        conversation_id = str(uuid.uuid4())
+        supabase.table("conversations").insert({
+            "id": conversation_id,
+            "chatbot_id": chatbot_id,
+            "visitor_id": visitor_id,
+        }).execute()
 
     # ── 3. Save user message ───────────────────────────────
     supabase.table("messages").insert({
