@@ -6,7 +6,10 @@ Uses delete + create instead of recreate_collection (deprecated in qdrant-client
 import logging
 import tenacity
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import (
+    Distance, VectorParams, PointStruct,
+    Filter, FieldCondition, MatchValue,
+)
 
 from config import QDRANT_HOST, QDRANT_PORT, QDRANT_API_KEY
 from services.embedder import EMBEDDING_DIM
@@ -119,3 +122,51 @@ def delete_collection(collection_name: str) -> None:
         logger.info(f"[Qdrant] Deleted collection: {collection_name}")
     except Exception as e:
         logger.warning(f"[Qdrant] Could not delete collection '{collection_name}': {e}")
+
+
+@RETRY
+def upsert_single_point(
+    collection_name: str,
+    point_id: str,
+    vector: list[float],
+    payload: dict,
+) -> None:
+    """Upsert a single named point (used for the website summary)."""
+    from qdrant_client.models import PointStruct
+    _client.upsert(
+        collection_name=collection_name,
+        points=[PointStruct(id=point_id, vector=vector, payload=payload)],
+    )
+
+
+def get_summary_chunk(collection_name: str) -> dict | None:
+    """
+    Retrieve the pre-generated website summary chunk.
+    Returns None if no summary was stored (e.g. old chatbot before this feature).
+    """
+    try:
+        results, _ = _client.scroll(
+            collection_name=collection_name,
+            scroll_filter=Filter(
+                must=[
+                    FieldCondition(
+                        key="is_summary",
+                        match=MatchValue(value=True),
+                    )
+                ]
+            ),
+            limit=1,
+            with_vectors=False,
+        )
+        if results:
+            payload = results[0].payload
+            return {
+                "text":       payload.get("text", ""),
+                "url":        payload.get("url", ""),
+                "title":      "Website Summary",
+                "score":      1.0,
+                "is_summary": True,
+            }
+    except Exception as e:
+        logger.warning(f"[Qdrant] Could not retrieve summary chunk: {e}")
+    return None

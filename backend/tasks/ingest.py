@@ -7,7 +7,7 @@ Runs scraping in the background using FastAPI's BackgroundTasks.
 import asyncio
 import logging
 from services.scraper import scrape_website
-from services.rag import ingest_pages, clear_response_cache_for_collection
+from services.rag import ingest_pages, generate_and_store_summary, clear_response_cache_for_collection
 from services.database import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -69,6 +69,23 @@ async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str)
             return
 
         logger.info(f"[Ingest] Stored {chunks_stored} chunks in Qdrant")
+
+        # ── Step 3.5: Generate + store website summary ────
+        # Uses Groq to create a comprehensive description of the whole site.
+        # Stored as a special Qdrant point so general questions ('what is this?')
+        # always receive a high-quality, coherent answer.
+        logger.info(f"[Ingest] Generating website summary for {website_url}")
+        try:
+            await loop.run_in_executor(
+                None,
+                generate_and_store_summary,
+                pages,
+                collection_name,
+                website_url,
+            )
+        except Exception as sum_err:
+            # Non-fatal — chatbot still works without summary
+            logger.warning(f"[Ingest] Summary generation failed (non-fatal): {sum_err}")
 
         clear_response_cache_for_collection(collection_name)
 
