@@ -18,10 +18,12 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    // Scroll only the messages box — NOT the whole page
+    const el = messagesRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [messages])
 
   const send = async () => {
@@ -97,7 +99,7 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
         {chatbotName}
       </div>
 
-      <div className="test-chat-messages">
+      <div className="test-chat-messages" ref={messagesRef}>
         {messages.length === 0 && (
           <p className="chat-empty">Ask a question to test your chatbot</p>
         )}
@@ -106,7 +108,6 @@ export default function TestChatPanel({ chatbotId, chatbotName }: Props) {
             {msg.content || (msg.role === 'assistant' && streaming ? '…' : '')}
           </div>
         ))}
-        <div ref={bottomRef} />
       </div>
 
       <div className="test-chat-input">
