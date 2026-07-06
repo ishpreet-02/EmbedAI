@@ -18,6 +18,7 @@ from models.schemas import (
 from middleware.auth import get_current_user
 from services.database import get_supabase
 from services.origins import default_allowed_origins
+from services.qdrant_service import delete_collection
 from tasks.ingest import run_ingestion
 
 import logging
@@ -152,8 +153,12 @@ async def delete_chatbot(
 
     chatbot = _get_owned_chatbot(chatbot_id, current_user["id"])
 
-    # TODO (Week 3): Also delete the Qdrant collection
-    # qdrant.delete_collection(chatbot["qdrant_collection"])
+    try:
+        delete_collection(chatbot["qdrant_collection"])
+    except Exception as e:
+        logger.warning(
+            f"[Delete] Could not delete Qdrant collection for chatbot {chatbot_id}: {e}"
+        )
 
     # Delete associated messages → conversations → chatbot
     conversations = (
