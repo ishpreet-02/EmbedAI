@@ -2,6 +2,8 @@
 Auth router — signup, login, me.
 """
 
+import asyncio
+
 from fastapi import APIRouter, HTTPException, status, Depends
 from passlib.context import CryptContext
 
@@ -20,7 +22,9 @@ async def signup(body: SignupRequest):
     supabase = get_supabase()
 
     # Check if email already exists
-    existing = supabase.table("users").select("id").eq("email", body.email).execute()
+    existing = await asyncio.to_thread(
+        lambda: supabase.table("users").select("id").eq("email", body.email).execute()
+    )
     if existing.data:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -29,10 +33,12 @@ async def signup(body: SignupRequest):
 
     # Hash password and insert user
     hashed = pwd_context.hash(body.password)
-    result = supabase.table("users").insert({
-        "email": body.email,
-        "password": hashed,
-    }).execute()
+    result = await asyncio.to_thread(
+        lambda: supabase.table("users").insert({
+            "email": body.email,
+            "password": hashed,
+        }).execute()
+    )
 
     if not result.data:
         raise HTTPException(
@@ -54,7 +60,9 @@ async def login(body: LoginRequest):
     """Authenticate user and return a JWT."""
     supabase = get_supabase()
 
-    result = supabase.table("users").select("*").eq("email", body.email).execute()
+    result = await asyncio.to_thread(
+        lambda: supabase.table("users").select("*").eq("email", body.email).execute()
+    )
     if not result.data:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -87,11 +95,13 @@ async def me(current_user: dict = Depends(get_current_user)):
     """Return the currently authenticated user."""
     supabase = get_supabase()
 
-    result = (
-        supabase.table("users")
-        .select("id, email, created_at")
-        .eq("id", current_user["id"])
-        .execute()
+    result = await asyncio.to_thread(
+        lambda: (
+            supabase.table("users")
+            .select("id, email, created_at")
+            .eq("id", current_user["id"])
+            .execute()
+        )
     )
 
     if not result.data:
