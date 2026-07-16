@@ -170,3 +170,51 @@ def get_summary_chunk(collection_name: str) -> dict | None:
     except Exception as e:
         logger.warning(f"[Qdrant] Could not retrieve summary chunk: {e}")
     return None
+
+
+def get_collection_source_scope(collection_name: str, max_points: int = 5000) -> dict:
+    """
+    Inspect an ingested collection and return source coverage details.
+    Useful for debugging grounding scope (which URLs were actually indexed).
+    """
+    seen_urls: dict[str, int] = {}
+    scanned_points = 0
+    summary_points = 0
+    offset = None
+
+    while scanned_points < max_points:
+        points, next_offset = _client.scroll(
+            collection_name=collection_name,
+            offset=offset,
+            limit=min(256, max_points - scanned_points),
+            with_vectors=False,
+        )
+
+        if not points:
+            break
+
+        for point in points:
+            payload = point.payload or {}
+            if payload.get("is_summary") is True:
+                summary_points += 1
+                continue
+
+            url = (payload.get("url") or "").strip()
+            if not url:
+                continue
+
+            seen_urls[url] = seen_urls.get(url, 0) + 1
+
+        scanned_points += len(points)
+        if next_offset is None:
+            break
+        offset = next_offset
+
+    urls_sorted = sorted(seen_urls.keys())
+    return {
+        "collection": collection_name,
+        "scanned_points": scanned_points,
+        "summary_points": summary_points,
+        "indexed_url_count": len(urls_sorted),
+        "indexed_urls": urls_sorted,
+    }

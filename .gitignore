@@ -35,6 +35,7 @@ pnpm-debug.log*
 
 # Local one-off maintenance scripts
 backend/backfill_summary.py
+backend/evals/
 
 # OS
 .DS_Store

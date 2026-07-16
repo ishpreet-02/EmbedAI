@@ -78,6 +78,9 @@ class ChatbotResponse(BaseModel):
     qdrant_collection: Optional[str] = None
     pages_indexed: Optional[int] = None
     chunks_stored: Optional[int] = None
+    website_summary: Optional[str] = None
+    key_pages: Optional[list[dict]] = None
+    summary_generated_at: Optional[str] = None
     allowed_origins: list[str] = []
     widget_color: str = '#6366f1'
     widget_header: str = 'AI Assistant'
@@ -91,6 +94,17 @@ class ChatbotStatusResponse(BaseModel):
     status: str
     pages_indexed: Optional[int] = None
     chunks_stored: Optional[int] = None
+
+
+class ChatbotScopeResponse(BaseModel):
+    chatbot_id: str
+    website_url: str
+    status: str
+    qdrant_collection: Optional[str] = None
+    scanned_points: int
+    summary_points: int
+    indexed_url_count: int
+    indexed_urls: list[str]
 
 
 # ── Chat Schemas ──────────────────────────────────────────

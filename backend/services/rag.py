@@ -93,7 +93,17 @@ STRICT RULES — follow these without exception:
 5. If the answer is genuinely not in the context, say exactly:
    "I don't have that information. Please contact us directly for help."
 6. Never answer general knowledge questions (capitals, sports, weather, etc.) — these are outside scope.
-7. Be concise and friendly. Avoid bullet-point dumps unless the question asks for a list."""
+7. If the context only partially supports a claim, explicitly hedge using phrases like
+    "Based on the available information..." or "The site suggests...".
+8. Do NOT generalize company-wide policy from a single testimonial or quote.
+    Treat testimonials as individual experiences unless a policy page confirms it.
+    If evidence is only one person's statement, do NOT conclude or imply a
+    company policy exists, even with hedging language.
+    In those cases, state only what that individual said and explicitly note that
+    no company-wide policy is confirmed in the provided context.
+9. Do NOT present regional numbers (country, office, unit, or team) as global totals.
+    If only regional data is present, label it clearly as regional.
+10. Be concise and friendly. Avoid bullet-point dumps unless the question asks for a list."""
 
 
 SUMMARY_SYSTEM_PROMPT = """You are an expert at understanding websites from their content.
@@ -215,7 +225,7 @@ def generate_and_store_summary(
     pages: list[dict],
     collection_name: str,
     website_url: str,
-) -> None:
+) -> dict | None:
     """
     Generate a website-level summary using Groq and store it as a special
     Qdrant point so it can be retrieved for general "about this site" questions.
@@ -272,6 +282,10 @@ def generate_and_store_summary(
         },
     )
     logger.info(f"[RAG] Website summary stored in '{collection_name}'")
+    return {
+        "summary": summary,
+        "key_pages": key_pages,
+    }
 
 
 # ── Query Intent Detection ────────────────────────────────

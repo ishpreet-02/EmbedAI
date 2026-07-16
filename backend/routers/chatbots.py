@@ -14,11 +14,12 @@ from models.schemas import (
     UpdateChatbotRequest,
     ChatbotResponse,
     ChatbotStatusResponse,
+    ChatbotScopeResponse,
 )
 from middleware.auth import get_current_user
 from services.database import get_supabase
 from services.origins import default_allowed_origins
-from services.qdrant_service import delete_collection
+from services.qdrant_service import delete_collection, collection_exists, get_collection_source_scope
 from tasks.ingest import run_ingestion
 
 import logging
@@ -225,6 +226,40 @@ async def resync_chatbot(
     )
 
 
+@router.get("/{chatbot_id}/scope", response_model=ChatbotScopeResponse)
+async def get_chatbot_scope(
+    chatbot_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Inspect which source URLs are currently indexed for this chatbot."""
+    chatbot = _get_owned_chatbot(chatbot_id, current_user["id"])
+    collection_name = chatbot.get("qdrant_collection")
+
+    if not collection_name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Chatbot does not have a collection yet",
+        )
+
+    if not collection_exists(collection_name):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collection not found",
+        )
+
+    scope = get_collection_source_scope(collection_name)
+    return ChatbotScopeResponse(
+        chatbot_id=chatbot["id"],
+        website_url=chatbot["website_url"],
+        status=chatbot["status"],
+        qdrant_collection=collection_name,
+        scanned_points=scope["scanned_points"],
+        summary_points=scope["summary_points"],
+        indexed_url_count=scope["indexed_url_count"],
+        indexed_urls=scope["indexed_urls"],
+    )
+
+
 @router.get("/{chatbot_id}/conversations")
 async def get_chatbot_conversations(
     chatbot_id: str,
@@ -309,6 +344,9 @@ def _to_chatbot_response(chatbot: dict) -> ChatbotResponse:
         qdrant_collection=chatbot.get("qdrant_collection"),
         pages_indexed=chatbot.get("pages_indexed"),
         chunks_stored=chatbot.get("chunks_stored"),
+        website_summary=chatbot.get("website_summary"),
+        key_pages=chatbot.get("key_pages"),
+        summary_generated_at=str(chatbot.get("summary_generated_at")) if chatbot.get("summary_generated_at") else None,
         allowed_origins=chatbot.get("allowed_origins") or [],
         widget_color=chatbot.get("widget_color") or "#6366f1",
         widget_header=chatbot.get("widget_header") or "AI Assistant",

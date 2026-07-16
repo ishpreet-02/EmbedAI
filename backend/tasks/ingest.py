@@ -6,6 +6,7 @@ Runs scraping in the background using FastAPI's BackgroundTasks.
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from services.scraper import scrape_website
 from services.rag import ingest_pages, generate_and_store_summary, clear_response_cache_for_collection
 from services.database import get_supabase
@@ -26,7 +27,10 @@ async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str)
     try:
         # ── Step 1: Mark as processing ────────────────────
         supabase.table("chatbots").update({
-            "status": "processing"
+            "status": "processing",
+            "website_summary": None,
+            "key_pages": None,
+            "summary_generated_at": None,
         }).eq("id", chatbot_id).execute()
 
         logger.info(f"[Ingest] Starting scrape for chatbot {chatbot_id}: {website_url}")
@@ -76,13 +80,19 @@ async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str)
         # always receive a high-quality, coherent answer.
         logger.info(f"[Ingest] Generating website summary for {website_url}")
         try:
-            await loop.run_in_executor(
+            summary_payload = await loop.run_in_executor(
                 None,
                 generate_and_store_summary,
                 pages,
                 collection_name,
                 website_url,
             )
+            if summary_payload and summary_payload.get("summary"):
+                supabase.table("chatbots").update({
+                    "website_summary": summary_payload["summary"],
+                    "key_pages": summary_payload.get("key_pages"),
+                    "summary_generated_at": datetime.now(timezone.utc).isoformat(),
+                }).eq("id", chatbot_id).execute()
         except Exception as sum_err:
             # Non-fatal — chatbot still works without summary
             logger.warning(f"[Ingest] Summary generation failed (non-fatal): {sum_err}")
