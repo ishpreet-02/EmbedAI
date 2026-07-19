@@ -73,11 +73,22 @@
     style.textContent = `
       @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
+      #cb-widget-container {
+        color-scheme: light;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+
       #cb-widget-container * {
         margin: 0;
         padding: 0;
         box-sizing: border-box;
         font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+        letter-spacing: 0;
+        text-shadow: none;
+        text-transform: none;
+        -webkit-text-stroke: 0 transparent;
       }
 
       /* ── Chat Bubble ──────────────────────────── */
@@ -207,13 +218,16 @@
         border-radius: 4px;
       }
 
-      .cb-msg {
+      #cb-widget-container .cb-msg {
         max-width: 85%;
         padding: 10px 14px;
         border-radius: 16px;
         font-size: 14px;
         line-height: 1.5;
+        color: #1f2937 !important;
         word-wrap: break-word;
+        white-space: pre-wrap;
+        text-align: left;
         animation: cb-fade-in 0.3s ease;
       }
 
@@ -222,25 +236,28 @@
         100% { opacity: 1; transform: translateY(0); }
       }
 
-      .cb-msg-user {
+      #cb-widget-container .cb-msg-user {
         align-self: flex-end;
         background: ${PRIMARY_COLOR};
-        color: white;
+        color: #ffffff !important;
+        -webkit-text-fill-color: #ffffff !important;
         border-bottom-right-radius: 4px;
       }
 
-      .cb-msg-assistant {
+      #cb-widget-container .cb-msg-assistant {
         align-self: flex-start;
-        background: white;
-        color: #1f2937;
+        background: #ffffff;
+        color: #1f2937 !important;
+        -webkit-text-fill-color: #1f2937 !important;
         border-bottom-left-radius: 4px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.08);
       }
 
-      .cb-msg-welcome {
+      #cb-widget-container .cb-msg-welcome {
         align-self: center;
         background: transparent;
-        color: #6b7280;
+        color: #6b7280 !important;
+        -webkit-text-fill-color: #6b7280 !important;
         font-size: 13px;
         text-align: center;
         padding: 8px;
@@ -286,15 +303,23 @@
       }
 
       #cb-input {
+        appearance: none;
+        -webkit-appearance: none;
         flex: 1;
         border: 1px solid #e5e7eb;
         border-radius: 24px;
         padding: 10px 16px;
         font-size: 14px;
+        line-height: 1.4;
+        color: #111827 !important;
+        caret-color: #111827;
         outline: none;
         transition: border-color 0.2s;
         font-family: 'Inter', sans-serif;
         background: #f9fafb;
+        box-shadow: none;
+        text-shadow: none;
+        -webkit-text-fill-color: #111827 !important;
       }
 
       #cb-input:focus {
@@ -302,7 +327,11 @@
         background: white;
       }
 
-      #cb-input::placeholder { color: #9ca3af; }
+      #cb-input::placeholder {
+        color: #9ca3af !important;
+        opacity: 1;
+        -webkit-text-fill-color: #9ca3af;
+      }
 
       #cb-send-btn {
         width: 38px;
@@ -310,7 +339,7 @@
         border-radius: 50%;
         border: none;
         background: ${PRIMARY_COLOR};
-        color: white;
+        color: #ffffff !important;
         cursor: pointer;
         display: flex;
         align-items: center;
@@ -326,7 +355,11 @@
         transform: none;
       }
 
-      #cb-send-btn svg { width: 18px; height: 18px; }
+      #cb-send-btn svg {
+        width: 18px;
+        height: 18px;
+        color: #ffffff !important;
+      }
 
       /* ── Powered By ───────────────────────────── */
       #cb-powered {
