@@ -43,7 +43,7 @@
     let PRIMARY_COLOR = "#6366f1";
     let POSITION      = "right";
     let HEADER_TEXT   = "AI Assistant";
-    let WELCOME_MSG   = "Hi there! How can I help you today?";
+    let WELCOME_MSG   = "Hi, I'm your AI Assistant. I noticed you were checking out our website. Are there any specific solutions or products you want to know more about?";
 
     try {
       const res = await fetch(
@@ -65,8 +65,19 @@
     buildWidget(PRIMARY_COLOR, POSITION, HEADER_TEXT, WELCOME_MSG);
   }
 
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
   // ── Build & mount widget after config is resolved ─────────────────────────
   function buildWidget(PRIMARY_COLOR, POSITION, HEADER_TEXT, WELCOME_MSG) {
+    const safeHeaderText = escapeHtml(HEADER_TEXT);
+    const safeWelcomeMsg = escapeHtml(WELCOME_MSG);
 
     // ── Inject Styles ───────────────────────────────────────────────────────
     const style = document.createElement("style");
@@ -254,13 +265,15 @@
       }
 
       #cb-widget-container .cb-msg-welcome {
-        align-self: center;
-        background: transparent;
-        color: #6b7280 !important;
-        -webkit-text-fill-color: #6b7280 !important;
-        font-size: 13px;
-        text-align: center;
-        padding: 8px;
+        align-self: flex-start;
+        background: #ffffff;
+        color: #1f2937 !important;
+        -webkit-text-fill-color: #1f2937 !important;
+        font-size: 14px;
+        text-align: left;
+        padding: 10px 14px;
+        border-bottom-left-radius: 4px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
       }
 
       /* ── Typing indicator ─────────────────────── */
@@ -416,13 +429,13 @@
             </svg>
           </div>
           <div id="cb-header-info">
-            <div id="cb-header-title">${HEADER_TEXT}</div>
+            <div id="cb-header-title">${safeHeaderText}</div>
             <div id="cb-header-subtitle">Ask me anything about this site</div>
           </div>
         </div>
 
         <div id="cb-messages">
-          <div class="cb-msg cb-msg-welcome">${WELCOME_MSG}</div>
+          <div class="cb-msg cb-msg-assistant cb-msg-welcome">${safeWelcomeMsg}</div>
         </div>
 
         <div id="cb-input-area">

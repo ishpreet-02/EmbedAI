@@ -11,8 +11,11 @@ export default function WidgetCustomization({ chatbot }: Props) {
   const queryClient = useQueryClient()
 
   const [color, setColor] = useState(chatbot.widget_color ?? '#6366f1')
-  const [header, setHeader] = useState(chatbot.widget_header ?? 'AI Assistant')
-  const [welcome, setWelcome] = useState(chatbot.widget_welcome ?? 'Hi there! How can I help you today?')
+  const [header, setHeader] = useState(chatbot.widget_header ?? `${chatbot.name} AI`)
+  const [welcome, setWelcome] = useState(
+    chatbot.widget_welcome ??
+      `Hi, I'm ${chatbot.name} AI, your AI Assistant from ${chatbot.name}. I noticed you were checking out our website. Are there any specific solutions or products you want to know more about?`,
+  )
   const [position, setPosition] = useState<'left' | 'right'>(chatbot.widget_position ?? 'right')
   const [saved, setSaved] = useState(false)
 
@@ -53,15 +56,15 @@ export default function WidgetCustomization({ chatbot }: Props) {
           </div>
         </label>
 
-        {/* Header text */}
+        {/* AI name */}
         <label style={{ fontSize: 13, fontWeight: 500 }}>
-          Widget header text
+          AI name
           <input
             type="text"
             value={header}
             onChange={(e) => setHeader(e.target.value)}
             maxLength={60}
-            placeholder="AI Assistant"
+            placeholder={`${chatbot.name} AI`}
             style={{
               display: 'block', width: '100%', marginTop: 6,
               padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)',
@@ -74,17 +77,17 @@ export default function WidgetCustomization({ chatbot }: Props) {
         {/* Welcome message */}
         <label style={{ fontSize: 13, fontWeight: 500 }}>
           Welcome message
-          <input
-            type="text"
+          <textarea
             value={welcome}
             onChange={(e) => setWelcome(e.target.value)}
-            maxLength={120}
-            placeholder="Hi there! How can I help you today?"
+            maxLength={300}
+            rows={4}
+            placeholder={`Hi, I'm ${chatbot.name} AI, your AI Assistant from ${chatbot.name}. I noticed you were checking out our website. Are there any specific solutions or products you want to know more about?`}
             style={{
               display: 'block', width: '100%', marginTop: 6,
               padding: '8px 10px', borderRadius: 6, border: '1px solid var(--border)',
               background: 'var(--input-bg)', color: 'var(--text)', fontSize: 13,
-              boxSizing: 'border-box',
+              boxSizing: 'border-box', resize: 'vertical', lineHeight: 1.5,
             }}
           />
         </label>

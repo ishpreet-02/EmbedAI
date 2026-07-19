@@ -153,16 +153,19 @@ export default function NewChatbot() {
         <div className="section">
           <form onSubmit={handleSubmit}>
             <div className="form-group">
-              <label className="form-label">Chatbot name</label>
+              <label className="form-label">Company or chatbot name</label>
               <input
                 type="text"
                 className="form-input"
-                placeholder="e.g. Yoga Studio Support"
+                placeholder="e.g. DDN"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
                 autoFocus
               />
+              <p className="form-hint">
+                Used to create the default AI name and first message. You can edit both later.
+              </p>
             </div>
 
             <div className="form-group">

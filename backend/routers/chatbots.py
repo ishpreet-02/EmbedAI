@@ -25,6 +25,48 @@ from tasks.ingest import run_ingestion
 import logging
 logger = logging.getLogger(__name__)
 
+LEGACY_DEFAULT_HEADER = "AI Assistant"
+LEGACY_DEFAULT_WELCOME = "Hi there! How can I help you today?"
+
+
+def _company_name(chatbot: dict) -> str:
+    """Use the dashboard chatbot name as the customer-facing company/brand name."""
+    name = str(chatbot.get("name") or "").strip()
+    return name or "this company"
+
+
+def _default_widget_header(company_name: str) -> str:
+    normalized = company_name.strip()
+    lower = normalized.lower()
+    if lower.endswith((" ai", " assistant", " bot", " chatbot")):
+        return normalized
+    return f"{normalized} AI"
+
+
+def _default_widget_welcome(ai_name: str, company_name: str) -> str:
+    return (
+        f"Hi, I'm {ai_name}, your AI Assistant from {company_name}. "
+        "I noticed you were checking out our website. Are there any specific "
+        "solutions or products you want to know more about?"
+    )
+
+
+def _resolved_widget_header(chatbot: dict) -> str:
+    stored = str(chatbot.get("widget_header") or "").strip()
+    if stored and stored != LEGACY_DEFAULT_HEADER:
+        return stored
+    return _default_widget_header(_company_name(chatbot))
+
+
+def _resolved_widget_welcome(chatbot: dict) -> str:
+    stored = str(chatbot.get("widget_welcome") or "").strip()
+    if stored and stored != LEGACY_DEFAULT_WELCOME:
+        return stored
+
+    company_name = _company_name(chatbot)
+    ai_name = _resolved_widget_header(chatbot)
+    return _default_widget_welcome(ai_name, company_name)
+
 
 def _run_ingestion_in_thread(chatbot_id: str, website_url: str, collection_name: str):
     """Run the async ingestion in a separate thread with its own event loop."""
@@ -47,6 +89,8 @@ async def create_chatbot(
     supabase = get_supabase()
 
     collection_name = f"chatbot_{uuid.uuid4().hex[:12]}"
+    default_header = _default_widget_header(body.name)
+    default_welcome = _default_widget_welcome(default_header, body.name)
 
     result = supabase.table("chatbots").insert({
         "user_id": current_user["id"],
@@ -55,6 +99,8 @@ async def create_chatbot(
         "status": "pending",
         "qdrant_collection": collection_name,
         "allowed_origins": default_allowed_origins(body.website_url, FRONTEND_URL),
+        "widget_header": default_header,
+        "widget_welcome": default_welcome,
     }).execute()
 
     if not result.data:
@@ -292,7 +338,7 @@ async def get_widget_config(chatbot_id: str):
 
     result = (
         supabase.table("chatbots")
-        .select("widget_color, widget_header, widget_welcome, widget_position, status")
+        .select("name, widget_color, widget_header, widget_welcome, widget_position, status")
         .eq("id", chatbot_id)
         .single()
         .execute()
@@ -304,8 +350,8 @@ async def get_widget_config(chatbot_id: str):
     data = result.data
     return {
         "color":    data.get("widget_color")   or "#6366f1",
-        "header":   data.get("widget_header")  or "AI Assistant",
-        "welcome":  data.get("widget_welcome") or "Hi there! How can I help you today?",
+        "header":   _resolved_widget_header(data),
+        "welcome":  _resolved_widget_welcome(data),
         "position": data.get("widget_position") or "right",
     }
 
@@ -349,8 +395,8 @@ def _to_chatbot_response(chatbot: dict) -> ChatbotResponse:
         summary_generated_at=str(chatbot.get("summary_generated_at")) if chatbot.get("summary_generated_at") else None,
         allowed_origins=chatbot.get("allowed_origins") or [],
         widget_color=chatbot.get("widget_color") or "#6366f1",
-        widget_header=chatbot.get("widget_header") or "AI Assistant",
-        widget_welcome=chatbot.get("widget_welcome") or "Hi there! How can I help you today?",
+        widget_header=_resolved_widget_header(chatbot),
+        widget_welcome=_resolved_widget_welcome(chatbot),
         widget_position=chatbot.get("widget_position") or "right",
         created_at=str(chatbot["created_at"]),
     )
