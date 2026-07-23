@@ -3,9 +3,9 @@ Website scraper — Playwright (headless browser) + BeautifulSoup (text extracti
 Crawls a website, finds all internal pages, and extracts clean readable text.
 """
 
-import asyncio
 import logging
-from urllib.parse import urlparse, urljoin
+from urllib.parse import urlparse
+import httpx
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 
@@ -19,6 +19,7 @@ MAX_PAGES = 20
 
 # Timeout per page in milliseconds
 PAGE_TIMEOUT = 15000
+MIN_TEXT_LENGTH = 50
 
 
 async def scrape_website(url: str) -> list[dict]:
@@ -33,12 +34,14 @@ async def scrape_website(url: str) -> list[dict]:
     """
     pages = []
     visited = set()
-    base_domain = urlparse(url).netloc
-    base_path = urlparse(url).path.rstrip("/")
 
     # Normalize the starting URL
     if not url.startswith("http"):
         url = f"https://{url}"
+
+    parsed_start = urlparse(url)
+    base_domain = _normalize_domain(parsed_start.netloc)
+    base_path = parsed_start.path.rstrip("/")
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -48,14 +51,23 @@ async def scrape_website(url: str) -> list[dict]:
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-gpu",
-                "--single-process",
-                "--js-flags=--max-old-space-size=256"
+                "--disable-extensions",
+                "--disable-background-networking",
+                "--disable-renderer-backgrounding",
             ]
         )
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1366, "height": 768},
         )
-        page = await context.new_page()
+
+        async def block_heavy_assets(route):
+            if route.request.resource_type in {"image", "media", "font"}:
+                await route.abort()
+            else:
+                await route.continue_()
+
+        await context.route("**/*", block_heavy_assets)
 
         # Start with the main URL
         urls_to_visit = [url]
@@ -69,6 +81,7 @@ async def scrape_website(url: str) -> list[dict]:
                 continue
             visited.add(normalized)
 
+            page = await context.new_page()
             try:
                 logger.info(f"Scraping: {current_url}")
                 response = await page.goto(
@@ -79,6 +92,9 @@ async def scrape_website(url: str) -> list[dict]:
 
                 if not response or response.status >= 400:
                     logger.warning(f"Skipping {current_url} — status {response.status if response else 'None'}")
+                    fallback_page = await _fetch_static_page(current_url)
+                    if fallback_page:
+                        pages.append(fallback_page)
                     continue
 
                 # Wait for the page to actually finish loading (network idle)
@@ -93,7 +109,7 @@ async def scrape_website(url: str) -> list[dict]:
                 # Extract clean text
                 text, title = _extract_text(html)
 
-                if text and len(text.strip()) > 50:
+                if text and len(text.strip()) > MIN_TEXT_LENGTH:
                     pages.append({
                         "url": current_url,
                         "title": title,
@@ -109,24 +125,65 @@ async def scrape_website(url: str) -> list[dict]:
                     )
                     for link in links:
                         link_normalized = link.split("#")[0].rstrip("/")
-                        link_domain = urlparse(link).netloc
+                        link_domain = _normalize_domain(urlparse(link).netloc)
                         link_path = urlparse(link).path.rstrip("/")
                         if (
                             link_domain == base_domain
                             and link_path.startswith(base_path)
                             and link_normalized not in visited
+                            and link_normalized not in urls_to_visit
                             and not _is_file_link(link)
                         ):
                             urls_to_visit.append(link)
 
             except Exception as e:
                 logger.warning(f"Error scraping {current_url}: {e}")
+                fallback_page = await _fetch_static_page(current_url)
+                if fallback_page:
+                    pages.append(fallback_page)
                 continue
+            finally:
+                if not page.is_closed():
+                    await page.close()
 
         await browser.close()
 
     logger.info(f"Scraping complete: {len(pages)} pages from {base_domain}")
     return pages
+
+
+async def _fetch_static_page(url: str) -> dict | None:
+    """Fallback for pages where Playwright navigation fails."""
+    try:
+        async with httpx.AsyncClient(
+            follow_redirects=True,
+            timeout=15,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            },
+        ) as client:
+            response = await client.get(url)
+
+        content_type = response.headers.get("content-type", "")
+        if response.status_code >= 400 or "text/html" not in content_type:
+            return None
+
+        text, title = _extract_text(response.text)
+        if text and len(text.strip()) > MIN_TEXT_LENGTH:
+            logger.info(f"  ✓ Static fallback extracted {len(text)} chars from: {title}")
+            return {
+                "url": url,
+                "title": title,
+                "text": text,
+            }
+    except Exception as e:
+        logger.warning(f"Static fallback failed for {url}: {e}")
+
+    return None
 
 
 def _extract_text(html: str) -> tuple[str, str]:
@@ -172,3 +229,7 @@ def _is_file_link(url: str) -> bool:
     }
     path = urlparse(url).path.lower()
     return any(path.endswith(ext) for ext in file_extensions)
+
+
+def _normalize_domain(domain: str) -> str:
+    return domain.lower().removeprefix("www.")

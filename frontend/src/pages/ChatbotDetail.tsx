@@ -168,7 +168,7 @@ export default function ChatbotDetail() {
           <div>
             <div className="section">
               <h2 className="section-title">Test your chatbot</h2>
-              <TestChatPanel chatbotId={chatbot.id} chatbotName={chatbot.name} />
+              <TestChatPanel chatbot={chatbot} />
             </div>
           </div>
         </div>

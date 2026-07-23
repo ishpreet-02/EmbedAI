@@ -4,17 +4,19 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0",
+    "dev:nodemon": "nodemon --watch src --watch index.html --watch vite.config.ts --watch tailwind.config.js --watch postcss.config.js --ext ts,tsx,js,jsx,css,html,json --exec \"vite --host 0.0.0.0\"",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.28.4",
     "axios": "^1.6.7",
     "lucide-react": "^0.363.0",
+    "nodemon": "^3.1.14",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.22.3",
-    "@tanstack/react-query": "^5.28.4"
+    "react-router-dom": "^6.22.3"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",

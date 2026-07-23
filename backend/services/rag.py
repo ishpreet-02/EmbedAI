@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # ── Constants ─────────────────────────────────────────────
 
 GROQ_MODEL       = "llama-3.3-70b-versatile"
-CHUNK_SIZE       = 500
-CHUNK_OVERLAP    = 50
+CHUNK_SIZE       = 1200
+CHUNK_OVERLAP    = 150
 TOP_K            = 5
 CACHE_MAX_SIZE   = 200
 
@@ -80,6 +80,11 @@ _GENERAL_TRIGGERS = [
     "what does it do",
 ]
 
+_GREETING_RE = re.compile(
+    r"^\s*(hi|hii+|hello|hey|heyy+|good morning|good afternoon|good evening|namaste)\s*[!.?]*\s*$",
+    re.IGNORECASE,
+)
+
 # ── Prompts ───────────────────────────────────────────────
 
 SYSTEM_PROMPT = """You are a helpful AI assistant embedded on a website.
@@ -122,9 +127,15 @@ Be factual. Use only information present in the content. Do not invent features 
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 
+# Separators are tried in order — paragraph breaks first, then sentence
+# breaks, then word breaks. This keeps related sentences together and
+# prevents headings from being split away from their content.
 _splitter = RecursiveCharacterTextSplitter(
     chunk_size=CHUNK_SIZE,
     chunk_overlap=CHUNK_OVERLAP,
+    separators=["\n\n", "\n", ". ", "! ", "? ", "; ", ", ", " ", ""],
+    length_function=len,
+    is_separator_regex=False,
 )
 
 # ── In-memory response cache ──────────────────────────────
@@ -300,6 +311,11 @@ def _is_general_question(question: str) -> bool:
     return any(trigger in q for trigger in _GENERAL_TRIGGERS)
 
 
+def _is_greeting(question: str) -> bool:
+    """Detect simple greetings that should not go through website retrieval."""
+    return bool(_GREETING_RE.match(question))
+
+
 # ── Query ─────────────────────────────────────────────────
 
 def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, None, None]:
@@ -310,6 +326,10 @@ def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, 
     - General question  → always include the website summary + broader chunk retrieval
     - Specific question → standard semantic search with score threshold
     """
+    if _is_greeting(question):
+        yield "Hello! How can I assist you today?"
+        return
+
     is_general = _is_general_question(question)
     query_vector = embed_query(question)
 

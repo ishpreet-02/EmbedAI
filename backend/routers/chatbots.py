@@ -3,8 +3,6 @@ Chatbot CRUD router — create, list, get, delete chatbots.
 """
 
 import uuid
-import threading
-import asyncio
 
 from fastapi import APIRouter, HTTPException, status, Depends
 
@@ -20,7 +18,7 @@ from middleware.auth import get_current_user
 from services.database import get_supabase
 from services.origins import default_allowed_origins
 from services.qdrant_service import delete_collection, collection_exists, get_collection_source_scope
-from tasks.ingest import run_ingestion
+from tasks.ingest import run_ingestion_task
 
 import logging
 logger = logging.getLogger(__name__)
@@ -68,14 +66,18 @@ def _resolved_widget_welcome(chatbot: dict) -> str:
     return _default_widget_welcome(ai_name, company_name)
 
 
-def _run_ingestion_in_thread(chatbot_id: str, website_url: str, collection_name: str):
-    """Run the async ingestion in a separate thread with its own event loop."""
+def _queue_ingestion(chatbot_id: str, website_url: str, collection_name: str) -> None:
+    """Queue website ingestion in Celery."""
     try:
-        logger.info(f"[Thread] Starting ingestion thread for chatbot {chatbot_id}")
-        asyncio.run(run_ingestion(chatbot_id, website_url, collection_name))
-        logger.info(f"[Thread] Ingestion thread completed for chatbot {chatbot_id}")
+        run_ingestion_task.delay(chatbot_id, website_url, collection_name)
+        logger.info(f"[Celery] Queued ingestion for chatbot {chatbot_id}")
     except Exception as e:
-        logger.error(f"[Thread] Ingestion thread CRASHED for chatbot {chatbot_id}: {e}", exc_info=True)
+        logger.error(f"[Celery] Failed to queue ingestion for chatbot {chatbot_id}: {e}", exc_info=True)
+        get_supabase().table("chatbots").update({"status": "failed"}).eq("id", chatbot_id).execute()
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Failed to queue ingestion job. Make sure Redis is running and REDIS_URL is correct.",
+        )
 
 router = APIRouter(prefix="/api/chatbots", tags=["Chatbots"])
 
@@ -111,13 +113,7 @@ async def create_chatbot(
 
     chatbot = result.data[0]
 
-    # Trigger background scraping task in a separate thread
-    thread = threading.Thread(
-        target=_run_ingestion_in_thread,
-        args=(chatbot["id"], body.website_url, collection_name),
-        daemon=True,
-    )
-    thread.start()
+    _queue_ingestion(chatbot["id"], body.website_url, collection_name)
 
     return _to_chatbot_response(chatbot)
 
@@ -254,15 +250,9 @@ async def resync_chatbot(
     from services.rag import clear_response_cache_for_collection
     clear_response_cache_for_collection(chatbot["qdrant_collection"])
 
-    # Kick off ingestion in a background thread
-    thread = threading.Thread(
-        target=_run_ingestion_in_thread,
-        args=(chatbot["id"], chatbot["website_url"], chatbot["qdrant_collection"]),
-        daemon=True,
-    )
-    thread.start()
+    _queue_ingestion(chatbot["id"], chatbot["website_url"], chatbot["qdrant_collection"])
 
-    logger.info(f"[Resync] Started resync for chatbot {chatbot_id}")
+    logger.info(f"[Resync] Queued resync for chatbot {chatbot_id}")
 
     return ChatbotStatusResponse(
         id=chatbot_id,

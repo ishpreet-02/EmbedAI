@@ -32,13 +32,11 @@ Businesses often want AI-powered chat support without manually writing FAQs or u
   - left/right bubble position.
 - Per-chatbot allowed-origin settings for widget chat/history requests.
 - Resync action that re-scrapes the website and rebuilds the Qdrant collection.
+- Redis + Celery background worker for durable website ingestion jobs.
 - Health endpoints at `/` and `/health`.
 
 ## Planned Or Incomplete
 
-- Redis is configured in `backend/config.py`, but no current code path uses Redis.
-- `backend/tasks/ingest.py` mentions a future Celery migration, but ingestion currently runs in daemon threads started by the FastAPI process.
-- `services.qdrant_service.delete_collection()` exists, but `DELETE /api/chatbots/{id}` does not call it yet. Deleting a chatbot removes Supabase rows but leaves the Qdrant collection behind.
 - File upload ingestion is not implemented in the current routers, services, schemas, or dashboard pages.
 
 ## Tech Stack
@@ -65,6 +63,8 @@ Businesses often want AI-powered chat support without manually writing FAQs or u
 - python-dotenv
 - httpx
 - slowapi rate limiting
+- Celery for background jobs
+- Redis as the Celery broker/result backend
 
 ### AI/RAG Pipeline
 
@@ -82,6 +82,7 @@ Businesses often want AI-powered chat support without manually writing FAQs or u
 - Docker Compose for the backend service
 - Backend Docker image based on `python:3.11-slim`
 - Nginx reverse proxy config for an EC2 host
+- Redis service for queued ingestion jobs
 - Supabase for relational data
 - Qdrant Cloud or local Qdrant, depending on `QDRANT_API_KEY`
 - Vercel frontend deployment config
@@ -93,7 +94,7 @@ backend/
 ├── routers/          # auth, chatbots, chat — API route handlers
 ├── services/         # scraper, rag, embedder, qdrant_service, database
 ├── models/           # Pydantic request/response schemas
-├── tasks/            # background ingestion (run_ingestion)
+├── tasks/            # Celery ingestion task and ingestion pipeline
 ├── middleware/        # JWT auth dependency
 ├── widget/            # embeddable widget.js served to customer sites
 └── main.py            # FastAPI app entrypoint, CORS, health checks
@@ -129,6 +130,14 @@ frontend/
    (POST /chatbots)    (POST /chat/{id})
           │                  │
           ▼                  ▼
+   ┌─────────────┐
+   │ Redis Queue │
+   └──────┬──────┘
+          ▼
+   ┌─────────────┐
+   │Celery Worker│
+   └──────┬──────┘
+          ▼
    ┌─────────────┐    ┌──────────────┐
    │ Playwright  │    │ sentence-    │
    │ + Chromium  │    │ transformers │
@@ -158,14 +167,14 @@ frontend/
    └───────────────────────────────────┘
 ```
 
-Ingestion and chat share the same Qdrant collections and Supabase tables, but run as two independent flows — ingestion happens once per chatbot creation/resync in a background thread, chat happens per visitor message on the public streaming endpoint.
+Ingestion and chat share the same Qdrant collections and Supabase tables, but run as two independent flows. Ingestion is queued through Redis and executed by a Celery worker, while chat happens per visitor message on the public streaming endpoint.
 
 ### Chatbot creation and ingestion
 
 1. The dashboard calls `POST /api/chatbots` with a chatbot name and website URL.
 2. The backend inserts a `chatbots` row in Supabase with `pending` status and a generated Qdrant collection name.
-3. A daemon thread starts `run_ingestion()`.
-4. Ingestion marks the chatbot `processing`, then `scrape_website()` opens the site with Playwright, follows same-domain internal links, and extracts cleaned text.
+3. The backend queues `run_ingestion_task` in Celery through Redis.
+4. A Celery worker runs `run_ingestion()`, marks the chatbot `processing`, then `scrape_website()` opens the site with Playwright, follows same-domain internal links, and extracts cleaned text.
 5. `ingest_pages()` splits page text into 500-character chunks with 50-character overlap, embeds the chunks locally, creates a fresh Qdrant collection, and upserts vectors with URL/title/text payloads.
 6. `generate_and_store_summary()` attempts to summarize selected key pages with Groq, embeds that summary, and stores it as a special Qdrant point. If summary generation fails, ingestion can still complete.
 7. Supabase is updated to `ready` with `pages_indexed` and `chunks_stored`, or `failed` if scraping/embedding produced no usable data or raised an error.
@@ -233,6 +242,14 @@ Response is a streamed `text/plain` body. `X-Conversation-Id` is returned as a r
 
 ### Backend
 
+Start Redis first:
+
+```powershell
+docker run -d --name embedai-redis -p 6379:6379 redis:7-alpine
+```
+
+Then install and run the API:
+
 ```powershell
 cd backend
 python -m venv .venv
@@ -241,6 +258,16 @@ pip install -r requirements.txt
 python -m playwright install chromium
 uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+In a second terminal, run the Celery worker:
+
+```powershell
+cd backend
+.\.venv\Scripts\Activate.ps1
+celery -A celery_app:celery_app worker --loglevel=info --pool=solo
+```
+
+`--pool=solo` is recommended on Windows local development. On Linux/EC2, use the Docker Compose worker command.
 
 On Linux, Playwright may also need:
 
@@ -264,7 +291,7 @@ Backend environment variables read by the code:
 - `CORS_ORIGINS`
 - `DEBUG`
 
-For the current implemented code paths, Supabase, Groq, and Qdrant settings must be valid before creating and chatting with a bot. `REDIS_URL` is read but not used by the running application.
+For the current implemented code paths, Supabase, Groq, Qdrant, and Redis settings must be valid before creating and chatting with a bot.
 
 ### Frontend
 
@@ -284,13 +311,14 @@ If `VITE_API_URL` is not set, the frontend calls `http://localhost:8000`.
 
 The checked-in deployment files target this split:
 
-- Backend runs on EC2 with Docker Compose using `backend/Dockerfile`.
+- Backend and Celery worker run on EC2 with Docker Compose using `backend/Dockerfile`.
+- Redis runs as an internal Docker Compose service for Celery.
 - Nginx proxies public traffic to the backend container on port `8000` and disables proxy buffering for streaming chat responses.
 - Supabase is external and stores users, chatbots, conversations, and messages.
 - Qdrant is external when `QDRANT_API_KEY` is set, matching the Qdrant Cloud comments in `docker-compose.yml` and `.env.production.template`.
 - Frontend is deployed separately on Vercel. `frontend/vercel.json` sets `VITE_API_URL` and rewrites SPA routes to `index.html`.
 
-`docker-compose.yml` only defines the backend container. It does not start local Supabase, Qdrant, Redis, or the frontend.
+`docker-compose.yml` defines the backend API, Celery worker, and Redis. It does not start local Supabase, Qdrant, or the frontend.
 
 ## Known Limitations
 
@@ -299,7 +327,5 @@ The checked-in deployment files target this split:
 - Sites that block headless browsers, require authentication, hide content behind forms, or need long-running client-side interactions can fail ingestion.
 - JavaScript-rendered pages are supported through Playwright, but the scraper waits with fixed timeouts and does not perform custom app interactions.
 - The backend Docker command runs a single Uvicorn worker to fit small EC2 instances.
-- Background ingestion runs inside the API process in daemon threads. There is no durable job queue or retry worker.
 - Chat response caching is in memory, so it is per-process and lost on restart.
-- Deleting a chatbot currently does not delete its Qdrant collection.
 - The landing page copy includes broad claims such as "works on any site"; the implemented scraper is best read as "works on publicly accessible pages that Playwright can render within the scraper limits."

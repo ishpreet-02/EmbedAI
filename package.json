@@ -1,0 +1,9 @@
+{
+  "name": "embedai-workspace",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix frontend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
+    "dev:frontend:nodemon": "npm --prefix frontend run dev:nodemon"
+  }
+}

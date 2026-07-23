@@ -1,12 +1,12 @@
 """
 Background ingestion task.
-Runs scraping in the background using FastAPI's BackgroundTasks.
-(Will be migrated to Celery + Redis in Week 5 for Docker deployment.)
+Runs scraping and vector ingestion in a Celery worker.
 """
 
 import asyncio
 import logging
 from datetime import datetime, timezone
+from celery_app import celery_app
 from services.scraper import scrape_website
 from services.rag import ingest_pages, generate_and_store_summary, clear_response_cache_for_collection
 from services.database import get_supabase
@@ -116,3 +116,16 @@ async def run_ingestion(chatbot_id: str, website_url: str, collection_name: str)
         supabase.table("chatbots").update({
             "status": "failed",
         }).eq("id", chatbot_id).execute()
+
+
+@celery_app.task(name="tasks.ingest.run_ingestion_task")
+def run_ingestion_task(chatbot_id: str, website_url: str, collection_name: str):
+    """
+    Celery entrypoint for website ingestion.
+
+    The core pipeline stays async because scraping uses Playwright. Celery calls this
+    sync wrapper in a separate worker process.
+    """
+    logger.info(f"[Celery] Queue worker started ingestion for chatbot {chatbot_id}")
+    asyncio.run(run_ingestion(chatbot_id, website_url, collection_name))
+    logger.info(f"[Celery] Queue worker finished ingestion for chatbot {chatbot_id}")
