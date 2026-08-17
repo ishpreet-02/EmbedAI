@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Globe, Loader2, CheckCircle, XCircle } from 'lucide-react'
+import type { AxiosError } from 'axios'
 import { chatbotsAPI } from '../api/client'
 
 type Phase = 'form' | 'polling' | 'done' | 'failed'
@@ -68,7 +69,7 @@ export default function NewChatbot() {
       startPolling(res.data.id)
     } catch (err: unknown) {
       const msg =
-        (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
+        (err as AxiosError<{ detail?: string }>)?.response?.data?.detail
         ?? 'Failed to create chatbot. Please try again.'
       setError(msg)
       setLoading(false)

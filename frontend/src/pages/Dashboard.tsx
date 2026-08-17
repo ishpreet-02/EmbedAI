@@ -10,6 +10,7 @@ export default function Dashboard() {
   const { data: chatbots, isLoading, isError } = useQuery({
     queryKey: ['chatbots'],
     queryFn: () => chatbotsAPI.list().then((r) => r.data),
+    refetchOnWindowFocus: true,
   })
 
   const deleteMutation = useMutation({

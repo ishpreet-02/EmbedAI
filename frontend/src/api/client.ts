@@ -99,6 +99,7 @@ export interface Conversation {
   chatbot_id: string
   visitor_id: string
   created_at: string
+  message_count: number   // returned by GET /conversations — PostgREST messages(count)
 }
 
 export interface Message {
