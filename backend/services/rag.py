@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────
 
-GROQ_MODEL       = "llama-3.3-70b-versatile"
+GROQ_MODEL       = "openai/gpt-oss-120b"
 CHUNK_SIZE       = 1200
 CHUNK_OVERLAP    = 150
 TOP_K            = 5
