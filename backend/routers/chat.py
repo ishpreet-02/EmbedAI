@@ -49,6 +49,13 @@ def _stream_chat_response(
     visitor_prefix: str = "visitor",
 ) -> StreamingResponse:
     """Shared chat execution used by the public widget and dashboard tester."""
+    MAX_MESSAGE_LENGTH = 2000
+
+    if len(body.message.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Message cannot be empty")
+    if len(body.message) > MAX_MESSAGE_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Message too long (max {MAX_MESSAGE_LENGTH} characters)")
+
     supabase = get_supabase()
 
     # ── Resolve conversation ────────────────────────────

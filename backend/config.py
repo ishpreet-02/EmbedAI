@@ -16,8 +16,9 @@ JWT_SECRET: str = os.getenv("JWT_SECRET", "change-me-in-production")
 JWT_ALGORITHM: str = os.getenv("JWT_ALGORITHM", "HS256")
 JWT_EXPIRATION_MINUTES: int = int(os.getenv("JWT_EXPIRATION_MINUTES", "1440"))
 
-# ── Groq (Week 3) ────────────────────────────────────────
+# ── Groq LLM ─────────────────────────────────────────────
 GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # ── Qdrant ────────────────────────────────────────────
 QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")

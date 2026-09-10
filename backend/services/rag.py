@@ -10,7 +10,7 @@ import tenacity
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from groq import Groq
 
-from config import GROQ_API_KEY
+from config import GROQ_API_KEY, GROQ_MODEL
 from services.embedder import embed_texts, embed_query
 from services.qdrant_service import (
     create_collection, upsert_chunks, search_chunks,
@@ -21,10 +21,9 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────
 
-GROQ_MODEL       = "openai/gpt-oss-120b"
 CHUNK_SIZE       = 1200
 CHUNK_OVERLAP    = 150
-TOP_K            = 5
+TOP_K            = 8
 CACHE_MAX_SIZE   = 200
 
 # Fixed UUID reserved for the website summary point in Qdrant
@@ -90,36 +89,47 @@ _GREETING_RE = re.compile(
 SYSTEM_PROMPT = """You are a helpful AI assistant embedded on a website.
 Your job is to help visitors understand the website and answer their questions.
 
-STRICT RULES — follow these without exception:
-1. Answer ONLY using the context provided below. Never invent, assume, or add information.
-2. For questions about what the website is, does, or offers — synthesize the context into a clear, natural explanation. Combine information from multiple sections if needed.
-3. For specific factual questions — give precise, direct answers from the context.
-4. When asked to explain simply or "like a beginner" — use plain, friendly language while staying factual.
-5. If the answer is genuinely not in the context, say exactly:
+RESPONSE LENGTH — match your answer length to the question:
+- Simple yes/no or factual questions: 1-2 sentences. Get straight to the point.
+- "What is" or "How does" questions: 2-4 sentences max.
+- "Tell me about" or overview questions: A short paragraph, 4-6 sentences max.
+- Only give longer answers if the user explicitly asks for detail or a full explanation.
+- NEVER pad answers with filler phrases or repeat the same information.
+
+FORMATTING RULES:
+- Write in plain text only. Do NOT use markdown (no **, *, #, ##, or --- ever).
+- For lists, use the bullet character "•" followed by a space, one item per line.
+  Example:
+  • Price tracking across 100+ stores
+  • Automatic coupon application at checkout
+  • Price drop alerts via notifications
+- For numbered steps, use plain numbers: 1. 2. 3.
+- Keep sentences short and punchy. Avoid long-winded paragraphs.
+
+CONTENT RULES:
+1. Answer ONLY from the context below. Never invent or assume information.
+2. For factual questions, give a direct answer first, then add brief detail if needed.
+3. If the answer is not in the context, say:
    "I don't have that information. Please contact us directly for help."
-6. Never answer general knowledge questions (capitals, sports, weather, etc.) — these are outside scope.
-7. If the context only partially supports a claim, explicitly hedge using phrases like
-    "Based on the available information..." or "The site suggests...".
-8. Do NOT generalize company-wide policy from a single testimonial or quote.
-    Treat testimonials as individual experiences unless a policy page confirms it.
-    If evidence is only one person's statement, do NOT conclude or imply a
-    company policy exists, even with hedging language.
-    In those cases, state only what that individual said and explicitly note that
-    no company-wide policy is confirmed in the provided context.
-9. Do NOT present regional numbers (country, office, unit, or team) as global totals.
-    If only regional data is present, label it clearly as regional.
-10. Be concise and friendly. Avoid bullet-point dumps unless the question asks for a list."""
+4. Never answer general knowledge questions (capitals, sports, weather, etc.).
+5. If context only partially supports an answer, say "Based on the available information..."
+6. Do NOT generalize company-wide policy from a single testimonial or quote.
+7. Do NOT present regional numbers as global totals.
+8. Be concise, friendly, and conversational."""
 
 
 SUMMARY_SYSTEM_PROMPT = """You are an expert at understanding websites from their content.
 Based ONLY on the provided website content, write a comprehensive but concise summary (150-250 words).
 
+Write in plain text only. Do NOT use markdown formatting (no **, *, #, or bullet dashes).
+Use flowing paragraphs and natural sentence structure.
+
 Cover ALL of the following that are present in the content:
-- What the website/platform is
-- What problem it solves or what it helps users do
-- Main features or capabilities
-- Who the intended users are
-- Any other key details a new visitor would want to know
+1. What the website or platform is.
+2. What problem it solves or what it helps users do.
+3. Main features or capabilities.
+4. Who the intended users are.
+5. Any other key details a new visitor would want to know.
 
 Be factual. Use only information present in the content. Do not invent features or make assumptions."""
 
@@ -348,7 +358,7 @@ def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, 
         results = [r for r in results if r.get("score", 1.0) > 0.1]
     else:
         results = search_chunks(collection_name, query_vector, limit=TOP_K)
-        results = [r for r in results if r["score"] > 0.3]
+        results = [r for r in results if r["score"] > 0.2]
 
     if not results:
         yield "I don't have enough information to answer that. Please contact us directly."

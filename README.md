@@ -74,7 +74,7 @@ Businesses often want AI-powered chat support without manually writing FAQs or u
 - sentence-transformers with `all-MiniLM-L6-v2` local embeddings
 - PyTorch CPU runtime via sentence-transformers
 - Qdrant client for vector storage and search
-- Groq SDK using `llama-3.3-70b-versatile`
+- Groq SDK configured via `GROQ_MODEL` environment variable (defaulting to `openai/gpt-oss-120b`)
 - Tenacity retries around Groq/Qdrant operations
 
 ### Infrastructure
