@@ -26,20 +26,27 @@ MAX_PAGES = 20
 PAGE_TIMEOUT = 15000
 MIN_TEXT_LENGTH = 50
 
-# If link crawling discovers fewer than this many URLs, try sitemap.xml
-_SITEMAP_FALLBACK_THRESHOLD = 3
 
 
 # ── Sitemap Discovery ─────────────────────────────────────
 
 async def _fetch_sitemap_urls(base_url: str, base_domain: str, base_path: str) -> list[str]:
     """
-    Try to fetch and parse sitemap.xml for additional page URLs.
-    Handles standard sitemaps and sitemap index files.
-    Returns a list of internal URLs found.
+    Try to fetch and parse sitemap.xml for page URLs.
+    Discovers sitemaps via:
+      1. Direct URL (if user provided a sitemap link)
+      2. robots.txt 'Sitemap: ...' directives
+      3. Common paths (/sitemap.xml, /sitemap_index.xml, /sitemap/sitemap.xml)
+    Handles standard urlsets and sitemap index files (<sitemapindex>).
     """
     parsed = urlparse(base_url)
-    sitemap_candidates = [
+    is_direct_sitemap = parsed.path.lower().endswith(".xml") or "sitemap" in parsed.path.lower()
+
+    candidates: list[str] = []
+    if is_direct_sitemap:
+        candidates.append(base_url)
+
+    std_candidates = [
         f"{parsed.scheme}://{parsed.netloc}/sitemap.xml",
         f"{parsed.scheme}://{parsed.netloc}/sitemap_index.xml",
         f"{parsed.scheme}://{parsed.netloc}/sitemap/sitemap.xml",
@@ -49,7 +56,7 @@ async def _fetch_sitemap_urls(base_url: str, base_domain: str, base_path: str) -
 
     async with httpx.AsyncClient(
         follow_redirects=True,
-        timeout=15,
+        timeout=6.0,
         headers={
             "User-Agent": (
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -58,21 +65,57 @@ async def _fetch_sitemap_urls(base_url: str, base_domain: str, base_path: str) -
             )
         },
     ) as client:
-        for sitemap_url in sitemap_candidates:
+        # Check robots.txt for declared sitemaps
+        try:
+            robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+            robots_resp = await client.get(robots_url)
+            if robots_resp.status_code == 200:
+                for line in robots_resp.text.splitlines():
+                    line_clean = line.strip()
+                    if line_clean.lower().startswith("sitemap:"):
+                        sm_url = line_clean.split(":", 1)[1].strip()
+                        if sm_url.startswith("http") and sm_url not in candidates:
+                            candidates.append(sm_url)
+        except Exception as e:
+            logger.debug(f"[Scraper] robots.txt fetch failed: {e}")
+
+        for std in std_candidates:
+            if std not in candidates:
+                candidates.append(std)
+
+        for sitemap_url in candidates:
             try:
                 response = await client.get(sitemap_url)
                 if response.status_code != 200:
                     continue
 
-                content_type = response.headers.get("content-type", "")
-                if "xml" not in content_type and "text" not in content_type:
+                content_type = response.headers.get("content-type", "").lower()
+                body = response.text.strip()
+
+                # Ignore HTML fallback responses from Single Page Apps
+                if "text/html" in content_type or body.lower().startswith("<!doctype") or body.lower().startswith("<html"):
                     continue
 
-                urls = _parse_sitemap_xml(response.text, base_domain, base_path)
+                sub_sitemaps, urls = _parse_sitemap_xml(body, base_domain, base_path)
+
+                # If this was a sitemap index, fetch sub-sitemaps (up to 3)
+                if sub_sitemaps and not urls:
+                    logger.info(f"[Scraper] Found sitemap index with {len(sub_sitemaps)} sub-sitemaps at {sitemap_url}")
+                    for sub_url in sub_sitemaps[:3]:
+                        try:
+                            sub_resp = await client.get(sub_url)
+                            if sub_resp.status_code == 200:
+                                _, sub_urls = _parse_sitemap_xml(sub_resp.text, base_domain, base_path)
+                                urls.extend(sub_urls)
+                                if len(urls) >= MAX_PAGES * 2:
+                                    break
+                        except Exception as sub_err:
+                            logger.debug(f"[Scraper] Sub-sitemap fetch failed {sub_url}: {sub_err}")
+
                 if urls:
                     logger.info(f"[Scraper] Found {len(urls)} URLs from {sitemap_url}")
                     all_urls.extend(urls)
-                    break  # Stop after the first successful sitemap
+                    break
             except Exception as e:
                 logger.debug(f"[Scraper] Sitemap fetch failed for {sitemap_url}: {e}")
                 continue
@@ -86,21 +129,29 @@ async def _fetch_sitemap_urls(base_url: str, base_domain: str, base_path: str) -
             seen.add(normalized)
             unique.append(u)
 
-    return unique[:MAX_PAGES * 2]  # Return more than MAX_PAGES — scraper will cap later
+    return unique[:MAX_PAGES * 2]
 
 
-def _parse_sitemap_xml(xml_text: str, base_domain: str, base_path: str) -> list[str]:
-    """Parse a sitemap.xml and return matching internal URLs."""
+def _parse_sitemap_xml(xml_text: str, base_domain: str, base_path: str) -> tuple[list[str], list[str]]:
+    """
+    Parse XML text of a sitemap or sitemap index.
+    Returns (sub_sitemaps, page_urls).
+    """
+    sub_sitemaps: list[str] = []
     urls: list[str] = []
     try:
         root = ET.fromstring(xml_text)
-        # Handle namespace (sitemaps use {http://www.sitemaps.org/schemas/sitemap/0.9})
         ns = ""
         if root.tag.startswith("{"):
             ns = root.tag.split("}")[0] + "}"
 
-        # Check if this is a sitemap index (contains <sitemap> elements)
-        # For simplicity, we only handle direct <url> entries
+        # 1. Sitemap index check
+        for sm in root.findall(f".//{ns}sitemap"):
+            loc = sm.find(f"{ns}loc")
+            if loc is not None and loc.text:
+                sub_sitemaps.append(loc.text.strip())
+
+        # 2. Standard page URL check
         for url_elem in root.findall(f".//{ns}url"):
             loc = url_elem.find(f"{ns}loc")
             if loc is not None and loc.text:
@@ -110,14 +161,14 @@ def _parse_sitemap_xml(xml_text: str, base_domain: str, base_path: str) -> list[
 
                 if (
                     link_domain == base_domain
-                    and link_path.startswith(base_path)
+                    and (not base_path or link_path.startswith(base_path))
                     and not _is_file_link(link)
                 ):
                     urls.append(link)
     except ET.ParseError:
         logger.debug("[Scraper] Failed to parse sitemap XML")
 
-    return urls
+    return sub_sitemaps, urls
 
 
 # ── Main Scraper ──────────────────────────────────────────
@@ -126,10 +177,12 @@ async def scrape_website(url: str) -> list[dict]:
     """
     Scrape a website starting from the given URL.
     
-    1. Visits the URL with a headless Chromium browser
-    2. Discovers all internal links on each page
-    3. If few links found, falls back to sitemap.xml discovery
-    4. Extracts clean text using BeautifulSoup
+    Discovery strategy (both are used together):
+      1. Always fetch sitemap.xml first (cheap HTTP call) to seed the crawl queue
+      2. Discover additional links via <a href> crawling on each visited page
+    
+    This ensures pages listed in the sitemap but not linked from the homepage
+    are still scraped, dramatically improving coverage for JS-heavy sites.
     
     Returns a list of {"url": str, "title": str, "text": str} dicts.
     """
@@ -142,8 +195,29 @@ async def scrape_website(url: str) -> list[dict]:
 
     parsed_start = urlparse(url)
     base_domain = _normalize_domain(parsed_start.netloc)
-    base_path = parsed_start.path.rstrip("/")
+    is_direct_sitemap = parsed_start.path.lower().endswith(".xml") or "sitemap" in parsed_start.path.lower()
+    base_path = "" if is_direct_sitemap else parsed_start.path.rstrip("/")
 
+    # ── Step 1: Seed crawl queue from sitemap (always tried first) ────
+    urls_to_visit = [] if is_direct_sitemap else [url]
+
+    try:
+        sitemap_urls = await _fetch_sitemap_urls(url, base_domain, base_path)
+        if sitemap_urls:
+            logger.info(f"[Scraper] Sitemap seeded {len(sitemap_urls)} URLs into crawl queue")
+            start_normalized = url.split("#")[0].rstrip("/")
+            for surl in sitemap_urls:
+                surl_normalized = surl.split("#")[0].rstrip("/")
+                if surl_normalized != start_normalized and surl_normalized not in urls_to_visit:
+                    urls_to_visit.append(surl)
+    except Exception as e:
+        logger.debug(f"[Scraper] Sitemap pre-fetch failed (will rely on link crawling): {e}")
+
+    # Fallback if user passed a direct sitemap URL but no URLs were parsed from it
+    if not urls_to_visit:
+        urls_to_visit = [f"{parsed_start.scheme}://{parsed_start.netloc}"]
+
+    # ── Step 2: Crawl pages (Playwright) ──────────────────────────────
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
@@ -169,9 +243,6 @@ async def scrape_website(url: str) -> list[dict]:
                 await route.continue_()
 
         await context.route("**/*", block_heavy_assets)
-
-        # Start with the main URL
-        urls_to_visit = [url]
 
         while urls_to_visit and len(pages) < MAX_PAGES:
             current_url = urls_to_visit.pop(0)
@@ -218,7 +289,7 @@ async def scrape_website(url: str) -> list[dict]:
                     })
                     logger.info(f"  ✓ Extracted {len(text)} chars from: {title}")
 
-                # Discover internal links
+                # Discover additional internal links from the page
                 if len(pages) < MAX_PAGES:
                     links = await page.eval_on_selector_all(
                         "a[href]",
@@ -236,30 +307,6 @@ async def scrape_website(url: str) -> list[dict]:
                             and not _is_file_link(link)
                         ):
                             urls_to_visit.append(link)
-
-                # ── Sitemap fallback ──────────────────────────
-                # If after scraping the first page we found very few new links,
-                # the site likely uses JS-based navigation or anti-bot protection.
-                # Try sitemap.xml to discover more pages.
-                if (
-                    len(visited) == 1
-                    and len(urls_to_visit) < _SITEMAP_FALLBACK_THRESHOLD
-                ):
-                    logger.info(
-                        f"[Scraper] Only {len(urls_to_visit)} links found via crawling — "
-                        f"trying sitemap.xml fallback"
-                    )
-                    sitemap_urls = await _fetch_sitemap_urls(url, base_domain, base_path)
-                    added = 0
-                    for surl in sitemap_urls:
-                        surl_normalized = surl.split("#")[0].rstrip("/")
-                        if surl_normalized not in visited and surl_normalized not in [
-                            u.split("#")[0].rstrip("/") for u in urls_to_visit
-                        ]:
-                            urls_to_visit.append(surl)
-                            added += 1
-                    if added:
-                        logger.info(f"[Scraper] Sitemap added {added} new URLs to crawl queue")
 
             except Exception as e:
                 logger.warning(f"Error scraping {current_url}: {e}")

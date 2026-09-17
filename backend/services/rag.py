@@ -5,6 +5,7 @@ RAG pipeline — text chunking, ingestion, and streaming query.
 import re
 import logging
 from typing import Generator
+from urllib.parse import urlparse
 
 import tenacity
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -326,19 +327,96 @@ def _is_greeting(question: str) -> bool:
     return bool(_GREETING_RE.match(question))
 
 
+# ── Source Grounding & Citation ───────────────────────────
+
+_STOPWORDS = {
+    "this", "that", "with", "from", "have", "will", "your", "they", "their",
+    "about", "there", "what", "when", "where", "which", "more", "also", "some",
+    "into", "been", "were", "them", "then", "than", "only", "very", "just",
+    "does", "help", "site", "website", "page", "user", "users", "please",
+}
+
+_FALLBACK_PHRASES = [
+    "don't have that information",
+    "don't have enough information",
+    "not in the context",
+    "please contact us directly",
+    "contact us directly",
+]
+
+
+def _extract_informative_terms(text: str) -> set[str]:
+    """Extract keywords of 3+ chars and numbers from text, excluding common stopwords."""
+    tokens = re.findall(r"\b[a-zA-Z0-9_-]{3,}\b", text.lower())
+    return {t for t in tokens if t not in _STOPWORDS}
+
+
+def extract_sources_from_chunks(chunks: list[dict], is_general: bool = False) -> list[dict]:
+    """
+    Deterministically select and deduplicate source URLs from retrieved chunks.
+    Returns: [{"url": str, "path": str, "title": str}]
+    """
+    if not chunks:
+        return []
+
+    max_score = max((c.get("score", 0.0) for c in chunks), default=0.0)
+    score_threshold = max(0.28, max_score - 0.15) if not is_general else 0.10
+
+    seen_urls = set()
+    sources: list[dict] = []
+
+    for c in chunks:
+        score = c.get("score", 0.0)
+        # Skip chunks that failed retrieval relevance threshold unless it's summary
+        if score < score_threshold and not c.get("is_summary"):
+            continue
+
+        raw_url = c.get("url", "").strip()
+        if not raw_url:
+            continue
+
+        normalized_url = raw_url.split("#")[0].rstrip("/")
+        if normalized_url in seen_urls:
+            continue
+        seen_urls.add(normalized_url)
+
+        parsed = urlparse(raw_url)
+        path = parsed.path.rstrip("/")
+        path = path if path else "/"
+
+        title = c.get("title", "").strip()
+        if not title or title.lower() in ("untitled", "website summary"):
+            title = path
+
+        sources.append({
+            "url": raw_url,
+            "path": path,
+            "title": title,
+        })
+
+    # If specific subpages (e.g. /pricing) are present, omit generic '/'
+    if len(sources) > 1:
+        sources = [s for s in sources if s["path"] != "/"]
+
+    return sources[:4]
+
+
 # ── Query ─────────────────────────────────────────────────
 
-def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, None, None]:
+def query_rag_with_sources(
+    question: str,
+    collection_name: str,
+) -> tuple[list[dict], Generator[str, None, None]]:
     """
-    RAG query pipeline — yields response tokens streaming from Groq.
-
-    Two retrieval strategies:
-    - General question  → always include the website summary + broader chunk retrieval
-    - Specific question → standard semantic search with score threshold
+    RAG query pipeline with source metadata extraction.
+    Returns (sources, stream_generator).
+    sources is a list of {"url": str, "path": str, "title": str} available immediately
+    for HTTP headers before streaming starts.
     """
     if _is_greeting(question):
-        yield "Hello! How can I assist you today?"
-        return
+        def _greeting_gen():
+            yield "Hello! How can I assist you today?"
+        return [], _greeting_gen()
 
     is_general = _is_general_question(question)
     query_vector = embed_query(question)
@@ -361,8 +439,11 @@ def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, 
         results = [r for r in results if r["score"] > 0.2]
 
     if not results:
-        yield "I don't have enough information to answer that. Please contact us directly."
-        return
+        def _no_info_gen():
+            yield "I don't have enough information to answer that. Please contact us directly."
+        return [], _no_info_gen()
+
+    sources = extract_sources_from_chunks(results, is_general=is_general)
 
     context_parts = []
     for r in results:
@@ -379,18 +460,27 @@ def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, 
     ]
 
     if is_general:
-        logger.info(f"[RAG] General question — using summary + {len(results)} chunks")
+        logger.info(f"[RAG] General question — using summary + {len(results)} chunks ({len(sources)} sources)")
     else:
         logger.info(
             f"[RAG] Specific question — {len(results)} chunks "
-            f"(top score: {results[0]['score']:.3f})"
+            f"(top score: {results[0]['score']:.3f}, {len(sources)} sources)"
         )
 
-    stream = _create_groq_stream(messages)
-    for chunk in stream:
-        delta = chunk.choices[0].delta.content
-        if delta:
-            yield delta
+    def _stream_gen():
+        stream = _create_groq_stream(messages)
+        for chunk in stream:
+            delta = chunk.choices[0].delta.content
+            if delta:
+                yield delta
+
+    return sources, _stream_gen()
+
+
+def _stream_rag_uncached(question: str, collection_name: str) -> Generator[str, None, None]:
+    """Yield response tokens streaming from Groq without source strings."""
+    _, stream = query_rag_with_sources(question, collection_name)
+    yield from stream
 
 
 def query_rag(question: str, collection_name: str) -> Generator[str, None, None]:

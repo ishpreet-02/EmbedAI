@@ -15,8 +15,9 @@ from slowapi.util import get_remote_address
 from models.schemas import ChatRequest
 from middleware.auth import get_current_user, verify_token
 from services.database import get_supabase
+import json
 from services.origins import extract_request_origin, is_origin_allowed
-from services.rag import query_rag
+from services.rag import query_rag, query_rag_with_sources
 from services.qdrant_service import collection_exists
 
 # Optional bearer — doesn't raise if the header is absent (unlike the
@@ -92,12 +93,15 @@ def _stream_chat_response(
         "content": body.message,
     }).execute()
 
+    # ── Prepare query and extract sources for response headers ────────
+    sources, rag_stream = query_rag_with_sources(body.message, collection_name)
+
     # ── Stream response and save when done ──────────────
     full_response: list[str] = []
 
     def generate():
         try:
-            for token in query_rag(body.message, collection_name):
+            for token in rag_stream:
                 full_response.append(token)
                 yield token
         except Exception as e:
@@ -127,7 +131,8 @@ def _stream_chat_response(
             # Widget/test panel can read these from the response headers
             "X-Visitor-Id": visitor_id,
             "X-Conversation-Id": conversation_id,
-            "Access-Control-Expose-Headers": "X-Visitor-Id, X-Conversation-Id",
+            "X-Sources": json.dumps(sources, ensure_ascii=True),
+            "Access-Control-Expose-Headers": "X-Visitor-Id, X-Conversation-Id, X-Sources",
         },
     )
 

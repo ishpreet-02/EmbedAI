@@ -46,3 +46,13 @@ Thumbs.db
 *.log
 deployment-files-extracted/
 DEPLOYMENT_GUIDE.md
+
+# Test files (delete after use, not for production)
+backend/test_*.py
+
+# One-off maintenance scripts
+backend/check_status.py
+backend/cleanup_orphaned_collections.py
+
+# Agent metadata
+.agent_log/

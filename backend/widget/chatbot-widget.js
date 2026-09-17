@@ -563,6 +563,18 @@
           conversationId = newConversationId;
         }
 
+        // Read sources metadata from separate response header
+        const sourcesHeader = response.headers.get("X-Sources");
+        let sources = [];
+        if (sourcesHeader) {
+          try {
+            sources = JSON.parse(sourcesHeader);
+          } catch (e) {
+            console.warn("[EmbedAI Widget] Could not parse X-Sources header", e);
+          }
+        }
+        console.log("[EmbedAI Widget] Sources received from header:", sources);
+
         removeTyping();
         const msgEl = document.createElement("div");
         msgEl.className = "cb-msg cb-msg-assistant";
