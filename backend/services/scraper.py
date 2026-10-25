@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 NOISE_TAGS = ["nav", "footer", "header", "script", "style", "noscript", "iframe", "svg"]
 
 # Max pages to scrape per website (prevents infinite crawls)
-MAX_PAGES = 20
+MAX_PAGES = 50
 
 # Timeout per page in milliseconds
 PAGE_TIMEOUT = 15000
