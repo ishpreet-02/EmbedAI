@@ -11,28 +11,29 @@ Businesses often want AI-powered chat support without manually writing FAQs or u
 - Email/password signup and login with JWT authentication.
 - Protected dashboard for creating, listing, opening, and deleting chatbots.
 - Website ingestion from a submitted URL:
-  - uses Playwright/Chromium to load pages,
-  - discovers internal links under the same starting path,
-  - extracts readable text with BeautifulSoup,
-  - crawls up to 20 pages per chatbot.
+  - uses Playwright/Chromium to render JavaScript and load dynamic SPAs,
+  - discovers pages via sitemap parsing (`robots.txt`, `/sitemap.xml`, and sitemap index files) with same-domain link crawling fallback,
+  - extracts clean readable text with BeautifulSoup while stripping boilerplate noise tags (`nav`, `footer`, `header`, `script`, etc.),
+  - crawls up to 50 pages per chatbot.
 - RAG knowledge base creation:
-  - chunks scraped text with `RecursiveCharacterTextSplitter`,
-  - embeds chunks locally with `sentence-transformers/all-MiniLM-L6-v2`,
-  - stores vectors and source metadata in an isolated Qdrant collection per chatbot.
-- Optional website summary point generated with Groq and stored in Qdrant for broad "what is this site?" questions.
-- Public streaming chat endpoint for embedded widgets.
-- Retrieval grounded in Qdrant search results, with Groq generating responses from retrieved context.
-- Conversation and message persistence in Supabase.
-- Dashboard conversation browser for reading visitor conversations.
-- One-line JavaScript embed served from the backend at `/widget.js`.
+  - chunks scraped text into 1,200-character segments with 150-character overlap using `RecursiveCharacterTextSplitter`,
+  - generates 384-dimensional dense embeddings with `sentence-transformers/all-MiniLM-L6-v2`,
+  - stores vectors and source metadata in an isolated Qdrant collection per chatbot (`chatbot_{id}`).
+- Pre-computed website summary point generated via Groq and stored in Qdrant (`SUMMARY_POINT_ID`) for high-level "what is this site?" questions.
+- Public streaming chat endpoint for embedded widgets with sub-second token streaming.
+- Retrieval grounded in Qdrant cosine similarity search with relevance score filtering (`score > 0.20`), eliminating hallucinations.
+- Source citation extraction returning deduplicated page URLs, titles, and paths exposed via the `X-Sources` response header.
+- Conversation and message persistence in Supabase with visitor session tracking (`X-Visitor-Id`).
+- Dashboard conversation browser for reading visitor conversation threads and analytics.
+- One-line JavaScript embed served from the backend at `/widget.js` with real-time streaming and citation pills.
 - Widget settings exposed in the dashboard:
-  - brand color,
-  - header text,
-  - welcome message,
+  - brand primary color,
+  - header text & assistant title,
+  - customizable welcome message,
   - left/right bubble position.
-- Per-chatbot allowed-origin settings for widget chat/history requests.
+- Per-chatbot allowed-origin settings (domain whitelisting) to prevent widget hijacking on unauthorized websites.
 - Resync action that re-scrapes the website and rebuilds the Qdrant collection.
-- Redis + Celery background worker for durable website ingestion jobs.
+- Redis + Celery background worker for durable, non-blocking asynchronous website ingestion jobs.
 - Health endpoints at `/` and `/health`.
 
 ## Planned Or Incomplete
@@ -174,9 +175,9 @@ Ingestion and chat share the same Qdrant collections and Supabase tables, but ru
 1. The dashboard calls `POST /api/chatbots` with a chatbot name and website URL.
 2. The backend inserts a `chatbots` row in Supabase with `pending` status and a generated Qdrant collection name.
 3. The backend queues `run_ingestion_task` in Celery through Redis.
-4. A Celery worker runs `run_ingestion()`, marks the chatbot `processing`, then `scrape_website()` opens the site with Playwright, follows same-domain internal links, and extracts cleaned text.
-5. `ingest_pages()` splits page text into 500-character chunks with 50-character overlap, embeds the chunks locally, creates a fresh Qdrant collection, and upserts vectors with URL/title/text payloads.
-6. `generate_and_store_summary()` attempts to summarize selected key pages with Groq, embeds that summary, and stores it as a special Qdrant point. If summary generation fails, ingestion can still complete.
+4. A Celery worker runs `run_ingestion()`, marks the chatbot `processing`, then `scrape_website()` discovers pages via sitemaps/crawling, renders pages with Playwright, and extracts cleaned text.
+5. `ingest_pages()` splits page text into 1,200-character chunks with 150-character overlap, generates 384-dim embeddings locally with `all-MiniLM-L6-v2`, creates an isolated Qdrant collection, and upserts vectors with URL/title/text payloads.
+6. `generate_and_store_summary()` attempts to summarize selected key pages with Groq, embeds that summary, and stores it as a dedicated Qdrant point (`SUMMARY_POINT_ID`). If summary generation fails, ingestion still safely completes.
 7. Supabase is updated to `ready` with `pages_indexed` and `chunks_stored`, or `failed` if scraping/embedding produced no usable data or raised an error.
 
 ### Chat query flow
@@ -184,10 +185,11 @@ Ingestion and chat share the same Qdrant collections and Supabase tables, but ru
 1. The widget or test panel posts a message to `POST /api/chat/{chatbot_id}`.
 2. The backend verifies the chatbot exists, checks the request origin against `allowed_origins`, requires `status == "ready"`, and verifies the Qdrant collection exists.
 3. The user message is saved in Supabase under a visitor conversation.
-4. `query_rag()` embeds the question, searches Qdrant, and filters low-scoring results. General site-overview questions also try to include the stored website summary.
-5. Retrieved chunks are passed to Groq with a system prompt that instructs the model to answer only from provided context.
-6. The response streams back as `text/plain`. After streaming completes, the full assistant message is saved in Supabase.
-7. Repeated identical questions for the same collection can be served from an in-memory response cache.
+4. `query_rag_with_sources()` embeds the question, searches Qdrant with cosine similarity, and applies relevance score filtering. General site-overview questions also inject the stored website summary.
+5. Extracted source citations (URL, path, title) are attached to the `X-Sources` response header.
+6. Retrieved chunks are passed to Groq with a system prompt that strictly instructs the model to answer only from provided context.
+7. The response streams back token-by-token as `text/plain`. After streaming completes, the full assistant message is saved in Supabase.
+8. Repeated identical questions for the same collection can be served from an in-memory response cache.
 
 ## API Reference
 
@@ -322,9 +324,9 @@ The checked-in deployment files target this split:
 
 ## Known Limitations
 
-- Scraping is capped at 20 pages per chatbot.
-- The crawler only follows internal links on the same domain and under the starting URL path.
-- Sites that block headless browsers, require authentication, hide content behind forms, or need long-running client-side interactions can fail ingestion.
+- Scraping is capped at 50 pages per chatbot (configurable via `MAX_PAGES`).
+- The crawler prioritizes sitemaps (`/sitemap.xml`, `robots.txt`) and follows internal links on the same domain and under the starting URL path.
+- Sites that aggressively block headless browsers, require CAPTCHAs, require authentication, or hide content behind forms can fail ingestion.
 - JavaScript-rendered pages are supported through Playwright, but the scraper waits with fixed timeouts and does not perform custom app interactions.
 - The backend Docker command runs a single Uvicorn worker to fit small EC2 instances.
 - Chat response caching is in memory, so it is per-process and lost on restart.
