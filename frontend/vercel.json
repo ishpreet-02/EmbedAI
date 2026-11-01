@@ -1,7 +1,7 @@
 {
   "build": {
     "env": {
-      "VITE_API_URL": "https://13-127-246-207.sslip.io"
+      "VITE_API_URL": "https://3-108-149-43.sslip.io"
     }
   },
   "rewrites": [
